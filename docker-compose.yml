@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tracelite-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tracelite
+      POSTGRES_PASSWORD: tracelite_dev
+      POSTGRES_DB: tracelite
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracelite"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
