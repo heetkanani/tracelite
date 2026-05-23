@@ -4,6 +4,8 @@ Client config + singleton for the tracelite SDK.
 Users call init() once at app startup; everything else reads from
 the module-level _client.
 """
+
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,6 +29,7 @@ def init(
     api_key: str,
     base_url: str = "http://localhost:8000",
     enabled: bool = True,
+    instrument: bool = True,
 ) -> None:
     """
     Initialize the SDK. Call once at app startup.
@@ -34,11 +37,13 @@ def init(
     Args:
         api_key: Your tracelite project API key.
         base_url: The tracelite backend URL.
-        enabled: Set False to disable all tracing (e.g. in tests).
+        enabled: Set False to disable all tracing.
+        instrument: Auto-patch known LLM libraries (currently OpenAI).
+                    Runs in a background thread so init() returns
+                    immediately even if `import openai` is slow.
     """
     global _client
 
-    # If we've been initialized before, stop the old sender first.
     if _client is not None and _client.sender is not None:
         _client.sender.shutdown()
 
@@ -49,6 +54,25 @@ def init(
         enabled=enabled,
         sender=sender,
     )
+
+    if enabled and instrument:
+        # Don't block init() on potentially-slow library imports.
+        threading.Thread(
+            target=_auto_instrument,
+            name="tracelite-instrumenter",
+            daemon=True,
+        ).start()
+
+
+def _auto_instrument() -> None:
+    """Patch every supported LLM library that's importable."""
+    # OpenAI
+    try:
+        from tracelite.integrations.openai import instrument_openai
+        instrument_openai()
+    except Exception as e:
+        # Never crash init() because of an instrumentation failure
+        print(f"[tracelite] openai instrumentation failed: {e}")
 
 
 def get_client() -> Optional[Client]:
