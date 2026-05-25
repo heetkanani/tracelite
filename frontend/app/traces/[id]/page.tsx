@@ -9,6 +9,7 @@ import { getTrace } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { SpanCard } from "@/components/traces/span-card";
+
 import {
   formatCost,
   formatDuration,

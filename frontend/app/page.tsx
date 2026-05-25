@@ -6,8 +6,12 @@ import { listTraces } from "@/lib/api";
 import { TraceTable } from "@/components/traces/trace-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-
+import { useFilters, filtersToApi } from "@/lib/filters";
+import { FilterBar } from "@/components/traces/filter-bar";
 export default function Home() {
+  const { filters } = useFilters();
+  const apiFilters = filtersToApi(filters);
+
   const {
     data,
     isLoading,
@@ -16,9 +20,9 @@ export default function Home() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["traces"],
+    queryKey: ["traces", apiFilters],
     queryFn: ({ pageParam }) =>
-      listTraces({ limit: 50, cursor: pageParam }),
+      listTraces({ limit: 50, cursor: pageParam, filters: apiFilters }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
   });
@@ -28,17 +32,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen p-8 max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold">tracelite</h1>
-        <p className="text-sm text-gray-500">
-          Recent traces
-          {data && (
-            <span className="ml-2 text-gray-400">
-              ({allTraces.length} loaded)
-            </span>
-          )}
-        </p>
-      </div>
+      <FilterBar />
 
       {isLoading && (
         <div className="space-y-2">
