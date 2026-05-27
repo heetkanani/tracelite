@@ -9,6 +9,7 @@ import { getTrace } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { SpanCard } from "@/components/traces/span-card";
+import { WaterfallView } from "@/components/traces/waterfall-view";
 
 import {
   formatCost,
@@ -81,20 +82,25 @@ export default function TraceDetailPage() {
           <TraceHeader trace={data.trace} spanCount={data.spans.length} />
 
           <h2 className="text-sm font-semibold text-gray-700 mt-8 mb-3">
-            Spans ({data.spans.length})
-          </h2>
+            Timeline
+            </h2>
+            <WaterfallView spans={data.spans} />
 
-          {data.spans.length === 0 ? (
+            <h2 className="text-sm font-semibold text-gray-700 mt-8 mb-3">
+            Spans ({data.spans.length})
+            </h2>
+
+            {data.spans.length === 0 ? (
             <p className="text-sm text-gray-400 py-8 text-center">
-              This trace has no spans yet.
+                This trace has no spans yet.
             </p>
-          ) : (
+            ) : (
             <div className="space-y-2">
-              {data.spans.map((span) => (
+                {data.spans.map((span) => (
                 <SpanCard key={span.id} span={span} />
-              ))}
+                ))}
             </div>
-          )}
+            )}
         </>
       )}
     </main>

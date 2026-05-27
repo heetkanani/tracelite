@@ -10,10 +10,11 @@ import asyncio
 import functools
 import json
 from typing import Any, Callable, Optional
+from uuid import uuid4
 
+from tracelite import context
 from tracelite.client import get_client
-from tracelite.span import Span, new_trace_id
-
+from tracelite.span import Span
 
 def observe(
     name: Optional[str] = None,
@@ -22,11 +23,8 @@ def observe(
     """
     Decorator that traces a function call as a Span.
 
-    Works on both sync and async functions.
-
-    Args:
-        name: Override the span name (defaults to the function's name).
-        span_type: One of "llm" | "tool" | "retrieval" | "generic".
+    Works on both sync and async functions. Nested @observe calls
+    automatically share a trace_id and link parent/child.
     """
     def decorator(func: Callable) -> Callable:
         # --- Async branch ----------------------------------------------------
@@ -37,12 +35,22 @@ def observe(
                 if client is None or not client.enabled:
                     return await func(*args, **kwargs)
 
+                # Read parent from context (None at the top of a call tree)
+                parent_ctx = context.get_current()
+                span_id = uuid4()
+                trace_id = parent_ctx.trace_id if parent_ctx else uuid4()
+
                 span = Span(
-                    trace_id=new_trace_id(),
+                    id=span_id,
+                    trace_id=trace_id,
                     name=name or func.__name__,
                     span_type=span_type,
+                    parent_span_id=parent_ctx.span_id if parent_ctx else None,
                     input=_safe_serialize({"args": args, "kwargs": kwargs}),
                 )
+
+                # Push self so nested @observe calls see us as parent
+                token = context.push(span_id=span_id, trace_id=trace_id)
                 try:
                     result = await func(*args, **kwargs)
                     span.output = _safe_serialize(result)
@@ -52,6 +60,7 @@ def observe(
                     span.error_message = f"{type(e).__name__}: {e}"
                     raise
                 finally:
+                    context.pop(token)
                     span.finish()
                     _emit(span)
             return async_wrapper
@@ -63,12 +72,20 @@ def observe(
             if client is None or not client.enabled:
                 return func(*args, **kwargs)
 
+            parent_ctx = context.get_current()
+            span_id = uuid4()
+            trace_id = parent_ctx.trace_id if parent_ctx else uuid4()
+
             span = Span(
-                trace_id=new_trace_id(),
+                id=span_id,
+                trace_id=trace_id,
                 name=name or func.__name__,
                 span_type=span_type,
+                parent_span_id=parent_ctx.span_id if parent_ctx else None,
                 input=_safe_serialize({"args": args, "kwargs": kwargs}),
             )
+
+            token = context.push(span_id=span_id, trace_id=trace_id)
             try:
                 result = func(*args, **kwargs)
                 span.output = _safe_serialize(result)
@@ -78,6 +95,7 @@ def observe(
                 span.error_message = f"{type(e).__name__}: {e}"
                 raise
             finally:
+                context.pop(token)
                 span.finish()
                 _emit(span)
 

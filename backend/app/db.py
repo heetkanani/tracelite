@@ -5,6 +5,7 @@ Owns a single asyncpg pool for the entire application lifetime.
 Modules that need DB access import `get_pool()`.
 """
 import os
+import json
 from typing import Optional
 
 import asyncpg
@@ -22,17 +23,32 @@ if not DATABASE_URL:
 # Module-level pool. Populated by init_pool() on app startup.
 _pool: Optional[asyncpg.Pool] = None
 
+async def _setup_connection(conn: asyncpg.Connection) -> None:
+    """Tell asyncpg to decode JSONB columns into Python dicts/lists."""
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+    await conn.set_type_codec(
+        "json",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+
 
 async def init_pool() -> None:
     """Create the connection pool. Called once at app startup."""
     global _pool
     _pool = await asyncpg.create_pool(
         dsn=DATABASE_URL,
-        min_size=2,      # always keep 2 connections open
-        max_size=10,     # at most 10 concurrent connections
-        command_timeout=10,  # kill queries that hang > 10s
+        min_size=2,
+        max_size=10,
+        command_timeout=10,
+        init=_setup_connection,
     )
-
 
 async def close_pool() -> None:
     """Close the connection pool. Called at app shutdown."""

@@ -22,13 +22,40 @@ import {
 
 interface TraceTableProps {
   traces: TraceListItem[];
+  hasActiveFilters?: boolean;
+  onResetFilters?: () => void;
 }
 
-export function TraceTable({ traces }: TraceTableProps) {
+export function TraceTable({
+  traces,
+  hasActiveFilters = false,
+  onResetFilters,
+}: TraceTableProps) {
   if (traces.length === 0) {
+    if (hasActiveFilters) {
+      return (
+        <div className="text-center py-12">
+          <p className="text-sm text-gray-600">No traces match these filters.</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Try widening the time range or clearing the type/status filters.
+          </p>
+          {onResetFilters && (
+            <button
+              onClick={onResetFilters}
+              className="mt-3 text-sm text-blue-600 hover:underline"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="text-center py-12 text-sm text-gray-500">
-        No traces yet. Run your instrumented app and refresh this page.
+        <p>No traces yet.</p>
+        <p className="text-xs text-gray-400 mt-1">
+          Run your instrumented app to see traces appear here.
+        </p>
       </div>
     );
   }

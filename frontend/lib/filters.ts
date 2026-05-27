@@ -76,11 +76,35 @@ function periodToSince(period: PeriodFilter): string | undefined {
   return new Date(Date.now() - ms).toISOString();
 }
 
-export function filtersToApi(state: FilterState): TraceListFilters {
+/**
+ * Convert UI filter state to the stable shape used as queryKey.
+ * IMPORTANT: do NOT compute `since` here — that produces a fresh
+ * ISO string every render and triggers infinite refetches.
+ * The query function calls periodToSince at fetch time instead.
+ */
+export interface ApiFilterKey {
+  status?: "ok" | "error";
+  span_type?: "llm" | "tool" | "retrieval" | "generic";
+  period?: PeriodFilter; // stable: "1h" not a timestamp
+}
+
+export function filtersToApi(state: FilterState): ApiFilterKey {
   return {
     status: state.status === "all" ? undefined : state.status,
     span_type: state.spanType === "all" ? undefined : state.spanType,
-    since: periodToSince(state.period),
+    period: state.period === "all" ? undefined : state.period,
+  };
+}
+
+/**
+ * Resolve a UI filter to the wire-format filters the API client expects.
+ * Computes `since` from `period` here, at fetch time.
+ */
+export function apiFiltersForFetch(key: ApiFilterKey): TraceListFilters {
+  return {
+    status: key.status,
+    span_type: key.span_type,
+    since: key.period ? periodToSince(key.period) : undefined,
   };
 }
 

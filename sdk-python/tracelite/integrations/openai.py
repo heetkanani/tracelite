@@ -10,7 +10,8 @@ from typing import Any
 
 from tracelite.client import get_client
 from tracelite.span import Span, new_trace_id
-
+from uuid import uuid4
+from tracelite import context
 
 # USD per 1M tokens. Update as new models ship.
 # Source: openai.com/api/pricing (snapshot, not live).
@@ -59,9 +60,24 @@ def _extract_usage(response: Any) -> tuple[int | None, int | None]:
         return None, None
     
 def _build_llm_span(model: str, messages: Any) -> Span:
-    """Start an LLM span. Caller fills in output and finishes it."""
+    """
+    Start an LLM span. Caller fills in output and finishes it.
+
+    Reads parent from the current tracing context — so if this call
+    happens inside an @observe'd function, the resulting span is
+    nested correctly. If there's no active context, this is a root.
+    """
+    from uuid import uuid4
+    from tracelite import context
+
+    parent_ctx = context.get_current()
+    span_id = uuid4()
+    trace_id = parent_ctx.trace_id if parent_ctx else uuid4()
+
     return Span(
-        trace_id=new_trace_id(),
+        id=span_id,
+        trace_id=trace_id,
+        parent_span_id=parent_ctx.span_id if parent_ctx else None,
         name="openai.chat.completions.create",
         span_type="llm",
         model=model,

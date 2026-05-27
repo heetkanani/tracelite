@@ -19,6 +19,16 @@ class Span:
     name: str
     span_type: str = "generic"  # "llm" | "tool" | "retrieval" | "generic"
     parent_span_id: Optional[UUID] = None
+    # Client-generated id. Set by the decorator before pushing onto context.
+    # The backend will use this id when inserting (enables parent_span_id
+    # references from sibling spans to resolve correctly).
+    id: Optional[UUID] = None
+
+    # Client-generated id, used by the decorator to know its own id BEFORE
+    # creating the Span (so it can push itself onto context). Backend
+    # currently ignores this and generates its own id, but having it here
+    # is essential for parent_span_id linking from siblings.
+    id_override: Optional[UUID] = None
 
     # Timing
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -51,6 +61,10 @@ class Span:
         """Serialize to the JSON shape the backend expects."""
         data = asdict(self)
         # UUIDs and datetimes must be strings for JSON
+        if self.id is not None:
+            data["id"] = str(self.id)
+        else:
+            data.pop("id", None)
         data["trace_id"] = str(self.trace_id)
         if self.parent_span_id is not None:
             data["parent_span_id"] = str(self.parent_span_id)
@@ -58,7 +72,6 @@ class Span:
         if self.ended_at is not None:
             data["ended_at"] = self.ended_at.isoformat()
         return data
-
 
 def new_trace_id() -> UUID:
     """Generate a fresh trace ID. Public so users can correlate manually."""
