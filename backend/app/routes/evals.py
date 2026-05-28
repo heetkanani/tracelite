@@ -1,0 +1,199 @@
+"""
+HTTP routes for eval definitions.
+
+Users create, list, update, and delete "rules" here. Actually running
+those rules against spans happens in a separate worker (Session 2).
+"""
+from typing import Annotated, Optional
+from uuid import UUID
+from app.evaluations import run_eval_against_recent_spans
+from fastapi import APIRouter, Header, HTTPException, Query
+
+from app.db import get_pool
+from app.models import (
+    EvalDefinitionCreate,
+    EvalDefinitionItem,
+    EvalDefinitionListResponse,
+    EvalDefinitionUpdate,
+)
+from app.queries import (
+    delete_eval_definition,
+    get_eval_definition,
+    get_project_by_api_key,
+    insert_eval_definition,
+    list_eval_definitions,
+    update_eval_definition,
+)
+
+router = APIRouter(prefix="/v1", tags=["evals"])
+
+
+# ----------------------------------------------------------------------
+# POST /v1/evals
+# ----------------------------------------------------------------------
+
+@router.post(
+    "/evals",
+    response_model=EvalDefinitionItem,
+    status_code=201,
+)
+async def create_eval_endpoint(
+    payload: EvalDefinitionCreate,
+    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+) -> EvalDefinitionItem:
+    """Create a new evaluation rule for the caller's project."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        project = await get_project_by_api_key(conn, x_api_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        row = await insert_eval_definition(
+            conn,
+            project_id=project["id"],
+            name=payload.name,
+            evaluator_type=payload.evaluator_type,
+            config=payload.config,
+            applies_to_span_type=payload.applies_to_span_type,
+            active=payload.active,
+        )
+
+    return EvalDefinitionItem(**dict(row))
+
+
+# ----------------------------------------------------------------------
+# GET /v1/evals
+# ----------------------------------------------------------------------
+
+@router.get("/evals", response_model=EvalDefinitionListResponse)
+async def list_evals_endpoint(
+    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    active_only: bool = Query(default=False),
+) -> EvalDefinitionListResponse:
+    """List all eval definitions for the caller's project."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        project = await get_project_by_api_key(conn, x_api_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        rows = await list_eval_definitions(
+            conn,
+            project_id=project["id"],
+            active_only=active_only,
+        )
+
+    items = [EvalDefinitionItem(**dict(r)) for r in rows]
+    return EvalDefinitionListResponse(items=items)
+
+
+# ----------------------------------------------------------------------
+# GET /v1/evals/{eval_id}
+# ----------------------------------------------------------------------
+
+@router.get("/evals/{eval_id}", response_model=EvalDefinitionItem)
+async def get_eval_endpoint(
+    eval_id: UUID,
+    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+) -> EvalDefinitionItem:
+    """Fetch one eval definition."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        project = await get_project_by_api_key(conn, x_api_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        row = await get_eval_definition(conn, eval_id, project["id"])
+        if row is None:
+            raise HTTPException(status_code=404, detail="Eval not found")
+
+    return EvalDefinitionItem(**dict(row))
+
+
+# ----------------------------------------------------------------------
+# PATCH /v1/evals/{eval_id}
+# ----------------------------------------------------------------------
+
+@router.patch("/evals/{eval_id}", response_model=EvalDefinitionItem)
+async def update_eval_endpoint(
+    eval_id: UUID,
+    payload: EvalDefinitionUpdate,
+    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+) -> EvalDefinitionItem:
+    """Update some fields on an eval definition. Only provided fields change."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        project = await get_project_by_api_key(conn, x_api_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        row = await update_eval_definition(
+            conn,
+            eval_id=eval_id,
+            project_id=project["id"],
+            name=payload.name,
+            config=payload.config,
+            applies_to_span_type=payload.applies_to_span_type,
+            active=payload.active,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Eval not found")
+
+    return EvalDefinitionItem(**dict(row))
+
+
+# ----------------------------------------------------------------------
+# DELETE /v1/evals/{eval_id}
+# ----------------------------------------------------------------------
+
+@router.delete("/evals/{eval_id}", status_code=204)
+async def delete_eval_endpoint(
+    eval_id: UUID,
+    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+) -> None:
+    """Delete an eval definition. Cascades to its results."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        project = await get_project_by_api_key(conn, x_api_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        deleted = await delete_eval_definition(conn, eval_id, project["id"])
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Eval not found")
+    # 204 No Content — no return body
+
+
+# ----------------------------------------------------------------------
+# POST /v1/evals/{eval_id}/run — manually trigger a run
+# ----------------------------------------------------------------------
+
+@router.post("/evals/{eval_id}/run")
+async def run_eval_endpoint(
+    eval_id: UUID,
+    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> dict:
+    """
+    Run an eval definition against the most recent matching spans.
+
+    Useful for backfilling: you create a new eval, then run it across
+    your existing spans to get historical scores.
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        project = await get_project_by_api_key(conn, x_api_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        try:
+            summary = await run_eval_against_recent_spans(
+                conn,
+                eval_id=eval_id,
+                project_id=project["id"],
+                limit=limit,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    return summary

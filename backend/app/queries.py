@@ -296,3 +296,192 @@ async def list_spans_for_trace(
         """,
         trace_id,
     )
+
+# -------------------------------------------------------------
+# Evaluation definitions — CRUD
+# -------------------------------------------------------------
+
+async def insert_eval_definition(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    name: str,
+    evaluator_type: str,
+    config: dict,
+    applies_to_span_type: Optional[str],
+    active: bool,
+) -> asyncpg.Record:
+    """Insert a new eval definition and return the inserted row."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO eval_definitions (
+            project_id, name, evaluator_type, config,
+            applies_to_span_type, active
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, name, evaluator_type, config,
+                  applies_to_span_type, active, created_at, updated_at
+        """,
+        project_id, name, evaluator_type, config,
+        applies_to_span_type, active,
+    )
+
+
+async def list_eval_definitions(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    active_only: bool = False,
+) -> list[asyncpg.Record]:
+    """Return all eval definitions for a project, newest first."""
+    if active_only:
+        sql = """
+            SELECT id, name, evaluator_type, config,
+                   applies_to_span_type, active, created_at, updated_at
+            FROM eval_definitions
+            WHERE project_id = $1 AND active = true
+            ORDER BY created_at DESC
+        """
+    else:
+        sql = """
+            SELECT id, name, evaluator_type, config,
+                   applies_to_span_type, active, created_at, updated_at
+            FROM eval_definitions
+            WHERE project_id = $1
+            ORDER BY created_at DESC
+        """
+    return await conn.fetch(sql, project_id)
+
+
+async def get_eval_definition(
+    conn: asyncpg.Connection,
+    eval_id: UUID,
+    project_id: UUID,
+) -> Optional[asyncpg.Record]:
+    """Fetch one eval definition, scoped to a project."""
+    return await conn.fetchrow(
+        """
+        SELECT id, name, evaluator_type, config,
+               applies_to_span_type, active, created_at, updated_at
+        FROM eval_definitions
+        WHERE id = $1 AND project_id = $2
+        """,
+        eval_id, project_id,
+    )
+
+
+async def update_eval_definition(
+    conn: asyncpg.Connection,
+    eval_id: UUID,
+    project_id: UUID,
+    name: Optional[str] = None,
+    config: Optional[dict] = None,
+    applies_to_span_type: Optional[str] = None,
+    active: Optional[bool] = None,
+) -> Optional[asyncpg.Record]:
+    """
+    Update only the provided fields. Returns the updated row, or None
+    if no eval with that id exists in the project.
+    """
+    # Build SET clause dynamically based on which fields are non-None.
+    # We use COALESCE so unset fields keep their existing value.
+    return await conn.fetchrow(
+        """
+        UPDATE eval_definitions
+        SET
+            name = COALESCE($3, name),
+            config = COALESCE($4, config),
+            applies_to_span_type = CASE WHEN $5::text IS NOT NULL THEN $5 ELSE applies_to_span_type END,
+            active = COALESCE($6, active),
+            updated_at = now()
+        WHERE id = $1 AND project_id = $2
+        RETURNING id, name, evaluator_type, config,
+                  applies_to_span_type, active, created_at, updated_at
+        """,
+        eval_id, project_id, name, config, applies_to_span_type, active,
+    )
+
+
+async def delete_eval_definition(
+    conn: asyncpg.Connection,
+    eval_id: UUID,
+    project_id: UUID,
+) -> bool:
+    """Delete an eval definition. Returns True if a row was deleted."""
+    result = await conn.execute(
+        """
+        DELETE FROM eval_definitions
+        WHERE id = $1 AND project_id = $2
+        """,
+        eval_id, project_id,
+    )
+    # execute() returns a string like "DELETE 1" or "DELETE 0"
+    return result.split()[-1] != "0"
+
+# -------------------------------------------------------------
+# Evaluation results — upsert pattern
+# -------------------------------------------------------------
+
+async def upsert_eval_result(
+    conn: asyncpg.Connection,
+    span_id: UUID,
+    eval_id: UUID,
+    score: Optional[float],
+    passed: Optional[bool],
+    reasoning: Optional[str],
+    cost_usd: float,
+) -> asyncpg.Record:
+    """
+    Insert an eval result, or overwrite if one exists for this (span, eval).
+
+    The UNIQUE (span_id, eval_id) constraint on eval_results means we
+    can use ON CONFLICT to make re-running an eval idempotent: the new
+    result replaces the old one, no duplicates.
+    """
+    return await conn.fetchrow(
+        """
+        INSERT INTO eval_results (
+            span_id, eval_id, score, passed, reasoning, cost_usd
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (span_id, eval_id) DO UPDATE SET
+            score       = EXCLUDED.score,
+            passed      = EXCLUDED.passed,
+            reasoning   = EXCLUDED.reasoning,
+            cost_usd    = EXCLUDED.cost_usd,
+            created_at  = now()
+        RETURNING id, span_id, eval_id, score, passed, reasoning, cost_usd, created_at
+        """,
+        span_id, eval_id, score, passed, reasoning, cost_usd,
+    )
+
+
+async def list_spans_for_eval_run(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    applies_to_span_type: Optional[str],
+    limit: int = 100,
+) -> list[asyncpg.Record]:
+    """
+    Fetch recent spans this eval should run against.
+
+    Filters by span_type when the eval specifies one. Newest first.
+    """
+    if applies_to_span_type is None:
+        sql = """
+            SELECT s.id, s.trace_id, s.name, s.span_type, s.output
+            FROM spans s
+            JOIN traces t ON t.id = s.trace_id
+            WHERE t.project_id = $1
+            ORDER BY s.started_at DESC
+            LIMIT $2
+        """
+        return await conn.fetch(sql, project_id, limit)
+
+    sql = """
+        SELECT s.id, s.trace_id, s.name, s.span_type, s.output
+        FROM spans s
+        JOIN traces t ON t.id = s.trace_id
+        WHERE t.project_id = $1 AND s.span_type = $2
+        ORDER BY s.started_at DESC
+        LIMIT $3
+    """
+    return await conn.fetch(sql, project_id, applies_to_span_type, limit)

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db import init_pool, close_pool, get_pool
 from app.routes.spans import router as spans_router
 from app.routes.traces import router as traces_router
+from app.routes.evals import router as evals_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,6 +47,7 @@ app.add_middleware(
 # Mount sub-routers
 app.include_router(spans_router)
 app.include_router(traces_router)
+app.include_router(evals_router)
 
 @app.get("/")
 async def root():

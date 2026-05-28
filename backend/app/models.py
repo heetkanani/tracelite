@@ -119,3 +119,44 @@ class TraceDetailResponse(BaseModel):
     """One trace with all its spans."""
     trace: TraceListItem
     spans: list[SpanItem]
+
+# -------------------------------------------------------------
+# Evaluations
+# -------------------------------------------------------------
+
+EvaluatorType = Literal["regex_match", "substring_absent", "json_schema", "llm_judge"]
+
+
+class EvalDefinitionCreate(BaseModel):
+    """Shape of an incoming eval definition from the user."""
+    name: str = Field(..., min_length=1, max_length=200)
+    evaluator_type: EvaluatorType
+    config: dict[str, Any] = Field(default_factory=dict)
+    applies_to_span_type: Optional[SpanType] = None
+    active: bool = True
+
+
+class EvalDefinitionItem(BaseModel):
+    """An eval definition as returned by the API."""
+    id: UUID
+    name: str
+    evaluator_type: EvaluatorType
+    config: dict[str, Any]
+    applies_to_span_type: Optional[SpanType] = None
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class EvalDefinitionListResponse(BaseModel):
+    """List of eval definitions for a project."""
+    items: list[EvalDefinitionItem]
+
+
+class EvalDefinitionUpdate(BaseModel):
+    """Patch payload for updating an eval definition.
+    Every field optional; only what's sent is updated."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    config: Optional[dict[str, Any]] = None
+    applies_to_span_type: Optional[SpanType] = None
+    active: Optional[bool] = None
