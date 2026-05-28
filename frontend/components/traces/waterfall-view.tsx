@@ -1,19 +1,39 @@
 "use client";
 
+import { useState } from "react";
+
 import type { SpanItem } from "@/lib/types";
 import {
   buildWaterfall,
   flattenWaterfall,
+  niceTicks,
   type WaterfallNode,
   type WaterfallStats,
 } from "@/lib/waterfall";
 import { formatCost, formatDuration } from "@/lib/format";
+import { SpanCard } from "@/components/traces/span-card";
 
 interface WaterfallViewProps {
   spans: SpanItem[];
 }
 
 export function WaterfallView({ spans }: WaterfallViewProps) {
+  // Track which span IDs the user has clicked to expand inline.
+  // Set<string> for O(1) lookups; toggle by adding/removing entries.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   if (spans.length === 0) {
     return (
       <div className="text-center py-12 text-sm text-gray-400">
@@ -34,14 +54,23 @@ export function WaterfallView({ spans }: WaterfallViewProps) {
         <span className="text-right w-[120px]">Duration · Cost</span>
       </div>
 
+      {/* Time axis */}
+      <div className="grid grid-cols-[minmax(220px,1fr)_2fr_auto] items-end px-4 pt-2 pb-1 border-b gap-4">
+        <span />
+        <TimeAxis stats={stats} />
+        <span className="w-[120px]" />
+      </div>
+
       {rows.map((node, index) => (
         <WaterfallRow
-            key={node.span.id}
-            node={node}
-            stats={stats}
-            showTooltipBelow={index < 2}
+          key={node.span.id}
+          node={node}
+          stats={stats}
+          showTooltipBelow={index < 2}
+          isExpanded={expandedIds.has(node.span.id)}
+          onToggle={() => toggleExpanded(node.span.id)}
         />
-        ))}
+      ))}
     </div>
   );
 }
@@ -54,10 +83,14 @@ function WaterfallRow({
   node,
   stats,
   showTooltipBelow,
+  isExpanded,
+  onToggle,
 }: {
   node: WaterfallNode;
   stats: WaterfallStats;
   showTooltipBelow: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
   const { span, depth, startOffsetMs, durationMs } = node;
 
@@ -71,38 +104,57 @@ function WaterfallRow({
   const barColor = isError ? "bg-red-500" : colorForSpanType(span.span_type);
 
   return (
-    <div className="grid grid-cols-[minmax(220px,1fr)_2fr_auto] items-center px-4 py-2 border-b last:border-b-0 hover:bg-gray-50 gap-4 text-sm">
-      {/* Name + indentation */}
+    <>
       <div
-        className="flex items-center gap-2 min-w-0"
-        style={{ paddingLeft: `${depth * 16}px` }}
+        onClick={onToggle}
+        className={`grid grid-cols-[minmax(220px,1fr)_2fr_auto] items-center px-4 py-2 border-b last:border-b-0 hover:bg-gray-50 gap-4 text-sm cursor-pointer ${
+          isExpanded ? "bg-blue-50/40" : ""
+        }`}
       >
-        <SpanTypeDot type={span.span_type} isError={isError} />
-        <span className="truncate text-gray-900">{span.name}</span>
-      </div>
-
-      {/* Timeline track */}
-      <div className="relative h-5 group">
-        <div className="absolute inset-0 bg-gray-100 rounded" />
+        {/* Name + indentation + chevron */}
         <div
-          className={`absolute top-0 bottom-0 ${barColor} rounded cursor-pointer`}
-          style={{
-            left: `${leftPct}%`,
-            width: `${widthPct}%`,
-          }}
-        />
-        {/* Tooltip — shown on hover via group-hover */}
-        <SpanTooltip node={node} showBelow={showTooltipBelow} />
+          className="flex items-center gap-2 min-w-0"
+          style={{ paddingLeft: `${depth * 16}px` }}
+        >
+          <span className="text-gray-400 text-xs inline-block w-3">
+            {isExpanded ? "▼" : "▶"}
+          </span>
+          <SpanTypeDot type={span.span_type} isError={isError} />
+          <span className="truncate text-gray-900">{span.name}</span>
+        </div>
+
+        {/* Timeline track */}
+        <div className="relative h-5 group">
+          <div className="absolute inset-0 bg-gray-100 rounded" />
+          <div
+            className={`absolute top-0 bottom-0 ${barColor} rounded`}
+            style={{
+              left: `${leftPct}%`,
+              width: `${widthPct}%`,
+            }}
+          />
+          <SpanTooltip node={node} showBelow={showTooltipBelow} />
+        </div>
+
+        {/* Duration + cost */}
+        <div className="text-xs text-gray-600 font-mono text-right w-[120px] shrink-0">
+          <div>{formatDuration(durationMs)}</div>
+          {span.cost_usd != null && span.cost_usd > 0 && (
+            <div className="text-gray-400">{formatCost(span.cost_usd)}</div>
+          )}
+        </div>
       </div>
 
-      {/* Duration + cost */}
-      <div className="text-xs text-gray-600 font-mono text-right w-[120px] shrink-0">
-        <div>{formatDuration(durationMs)}</div>
-        {span.cost_usd != null && span.cost_usd > 0 && (
-          <div className="text-gray-400">{formatCost(span.cost_usd)}</div>
-        )}
-      </div>
-    </div>
+      {/* Inline detail panel — only when expanded */}
+      {isExpanded && (
+        <div
+          className="px-4 py-3 border-b last:border-b-0 bg-gray-50"
+          style={{ paddingLeft: `${16 + depth * 16}px` }}
+        >
+          <SpanCard span={span} />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -153,7 +205,7 @@ function SpanTooltip({
     <div
       className={`absolute z-50 left-0 ${positionClass} hidden group-hover:block pointer-events-none`}
     >
-        <div className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 shadow-lg whitespace-nowrap">
+      <div className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 shadow-lg whitespace-nowrap">
         <div className="font-semibold">{span.name}</div>
         <div className="text-gray-300 mt-1 space-y-0.5">
           <div>
@@ -189,6 +241,26 @@ function SpanTooltip({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function TimeAxis({ stats }: { stats: WaterfallStats }) {
+  const ticks = niceTicks(stats.totalDurationMs);
+  return (
+    <div className="relative h-4">
+      {ticks.map((tickMs) => {
+        const leftPct = (tickMs / stats.totalDurationMs) * 100;
+        return (
+          <div
+            key={tickMs}
+            className="absolute top-0 -translate-x-1/2 text-[10px] text-gray-400 font-mono"
+            style={{ left: `${leftPct}%` }}
+          >
+            {tickMs}ms
+          </div>
+        );
+      })}
     </div>
   );
 }

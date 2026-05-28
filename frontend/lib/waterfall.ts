@@ -117,3 +117,34 @@ export function flattenWaterfall(roots: WaterfallNode[]): WaterfallNode[] {
   roots.forEach(walk);
   return out;
 }
+
+/**
+ * Compute 4-7 evenly-spaced "round number" tick values from 0 to totalMs.
+ * Used by the waterfall's time axis. Returns an array of ms values.
+ *
+ * Examples:
+ *   niceTicks(185)  -> [0, 50, 100, 150, 200]
+ *   niceTicks(2500) -> [0, 500, 1000, 1500, 2000, 2500]
+ *   niceTicks(45)   -> [0, 10, 20, 30, 40, 50]
+ */
+export function niceTicks(totalMs: number): number[] {
+  if (totalMs <= 0) return [0];
+
+  // Pick a "step size" that gives us 4-7 ticks.
+  // We try a sequence of round numbers (1, 2, 5, 10, 20, 50, 100, ...).
+  const candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+  let step = candidates[0];
+  for (const c of candidates) {
+    const numTicks = Math.ceil(totalMs / c) + 1;
+    if (numTicks <= 7) {
+      step = c;
+      break;
+    }
+  }
+
+  const ticks: number[] = [];
+  for (let t = 0; t <= totalMs; t += step) {
+    ticks.push(t);
+  }
+  return ticks;
+}

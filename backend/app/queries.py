@@ -253,12 +253,25 @@ async def get_trace_by_id(
     trace_id: UUID,
     project_id: UUID,
 ) -> Optional[asyncpg.Record]:
-    """Fetch one trace, scoped to a project so users can't snoop."""
+    """
+    Fetch one trace with span aggregates, scoped to a project.
+
+    Aggregates match the trace list query so the detail header shows
+    consistent numbers (cost, duration, span count, error status).
+    """
     return await conn.fetchrow(
         """
-        SELECT id, name, started_at, ended_at, user_id, session_id, metadata
-        FROM traces
-        WHERE id = $1 AND project_id = $2
+        SELECT
+            t.id, t.name, t.started_at, t.ended_at,
+            t.user_id, t.session_id, t.metadata,
+            COUNT(s.id)::int                              AS span_count,
+            COALESCE(SUM(s.cost_usd), 0)::float           AS total_cost_usd,
+            MAX(s.duration_ms)                            AS max_duration_ms,
+            COALESCE(BOOL_OR(s.status = 'error'), false)  AS has_error
+        FROM traces t
+        LEFT JOIN spans s ON s.trace_id = t.id
+        WHERE t.id = $1 AND t.project_id = $2
+        GROUP BY t.id
         """,
         trace_id, project_id,
     )
