@@ -529,3 +529,235 @@ async def list_eval_results_for_trace(
         """,
         trace_id,
     )
+
+# -------------------------------------------------------------
+# Alert rules — CRUD
+# -------------------------------------------------------------
+
+async def insert_alert_rule(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    name: str,
+    condition_type: str,
+    config: dict,
+    delivery_channel: str,
+    delivery_config: dict,
+    active: bool,
+    min_resend_minutes: int,
+) -> asyncpg.Record:
+    """Insert a new alert rule and return the row."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO alert_rules (
+            project_id, name, condition_type, config,
+            delivery_channel, delivery_config,
+            active, min_resend_minutes
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, name, condition_type, config,
+                  delivery_channel, delivery_config,
+                  active, min_resend_minutes,
+                  last_evaluated_at, last_fired_at,
+                  created_at, updated_at
+        """,
+        project_id, name, condition_type, config,
+        delivery_channel, delivery_config,
+        active, min_resend_minutes,
+    )
+
+
+async def list_alert_rules(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    active_only: bool = False,
+) -> list[asyncpg.Record]:
+    """Return alert rules for a project, newest first."""
+    sql = """
+        SELECT id, name, condition_type, config,
+               delivery_channel, delivery_config,
+               active, min_resend_minutes,
+               last_evaluated_at, last_fired_at,
+               created_at, updated_at
+        FROM alert_rules
+        WHERE project_id = $1
+    """
+    if active_only:
+        sql += " AND active = true"
+    sql += " ORDER BY created_at DESC"
+    return await conn.fetch(sql, project_id)
+
+
+async def get_alert_rule(
+    conn: asyncpg.Connection,
+    rule_id: UUID,
+    project_id: UUID,
+) -> Optional[asyncpg.Record]:
+    """Fetch one alert rule, scoped to a project."""
+    return await conn.fetchrow(
+        """
+        SELECT id, name, condition_type, config,
+               delivery_channel, delivery_config,
+               active, min_resend_minutes,
+               last_evaluated_at, last_fired_at,
+               created_at, updated_at
+        FROM alert_rules
+        WHERE id = $1 AND project_id = $2
+        """,
+        rule_id, project_id,
+    )
+
+
+async def update_alert_rule(
+    conn: asyncpg.Connection,
+    rule_id: UUID,
+    project_id: UUID,
+    name: Optional[str] = None,
+    config: Optional[dict] = None,
+    delivery_channel: Optional[str] = None,
+    delivery_config: Optional[dict] = None,
+    active: Optional[bool] = None,
+    min_resend_minutes: Optional[int] = None,
+) -> Optional[asyncpg.Record]:
+    """Update only provided fields. None = leave alone."""
+    return await conn.fetchrow(
+        """
+        UPDATE alert_rules
+        SET
+            name               = COALESCE($3, name),
+            config             = COALESCE($4, config),
+            delivery_channel   = COALESCE($5, delivery_channel),
+            delivery_config    = COALESCE($6, delivery_config),
+            active             = COALESCE($7, active),
+            min_resend_minutes = COALESCE($8, min_resend_minutes),
+            updated_at         = now()
+        WHERE id = $1 AND project_id = $2
+        RETURNING id, name, condition_type, config,
+                  delivery_channel, delivery_config,
+                  active, min_resend_minutes,
+                  last_evaluated_at, last_fired_at,
+                  created_at, updated_at
+        """,
+        rule_id, project_id, name, config,
+        delivery_channel, delivery_config, active, min_resend_minutes,
+    )
+
+
+async def delete_alert_rule(
+    conn: asyncpg.Connection,
+    rule_id: UUID,
+    project_id: UUID,
+) -> bool:
+    """Delete an alert rule. True if a row was deleted."""
+    result = await conn.execute(
+        "DELETE FROM alert_rules WHERE id = $1 AND project_id = $2",
+        rule_id, project_id,
+    )
+    return result.split()[-1] != "0"
+
+
+# -------------------------------------------------------------
+# Alert rules — used by the background worker
+# -------------------------------------------------------------
+
+async def list_alert_rules_due_for_evaluation(
+    conn: asyncpg.Connection,
+    older_than_seconds: int = 300,
+) -> list[asyncpg.Record]:
+    """
+    Pull active alert rules across all projects that haven't been
+    evaluated in the last `older_than_seconds` seconds.
+
+    Used by the background worker — runs every minute or so.
+    `NULLS FIRST` ensures brand-new rules (never evaluated) come first.
+
+    Note: make_interval(secs => $1) lets us pass an integer parameter
+    cleanly. The earlier approach using string concatenation forced
+    asyncpg to infer $1 as text and reject our int input.
+    """
+    return await conn.fetch(
+        """
+        SELECT id, project_id, name, condition_type, config,
+               delivery_channel, delivery_config,
+               min_resend_minutes,
+               last_evaluated_at, last_fired_at
+        FROM alert_rules
+        WHERE active = true
+          AND (
+              last_evaluated_at IS NULL
+              OR last_evaluated_at < now() - make_interval(secs => $1)
+          )
+        ORDER BY last_evaluated_at ASC NULLS FIRST
+        LIMIT 100
+        """,
+        older_than_seconds,
+    )
+
+async def mark_alert_rule_evaluated(
+    conn: asyncpg.Connection,
+    rule_id: UUID,
+) -> None:
+    """Set last_evaluated_at = now(). Called after every check."""
+    await conn.execute(
+        "UPDATE alert_rules SET last_evaluated_at = now() WHERE id = $1",
+        rule_id,
+    )
+
+
+async def mark_alert_rule_fired(
+    conn: asyncpg.Connection,
+    rule_id: UUID,
+) -> None:
+    """Set last_fired_at = now(). Called only when the rule fires."""
+    await conn.execute(
+        "UPDATE alert_rules SET last_fired_at = now() WHERE id = $1",
+        rule_id,
+    )
+
+
+# -------------------------------------------------------------
+# Alert events
+# -------------------------------------------------------------
+
+async def insert_alert_event(
+    conn: asyncpg.Connection,
+    alert_rule_id: UUID,
+    message: str,
+    context: dict,
+    delivered: bool,
+    delivery_error: Optional[str],
+) -> asyncpg.Record:
+    """Record one fire event."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO alert_events (
+            alert_rule_id, message, context, delivered, delivery_error
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, alert_rule_id, fired_at, message, context,
+                  delivered, delivery_error
+        """,
+        alert_rule_id, message, context, delivered, delivery_error,
+    )
+
+
+async def list_alert_events(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    limit: int = 50,
+) -> list[asyncpg.Record]:
+    """
+    Recent alert events for a project, newest first.
+    JOINs through alert_rules to scope by project.
+    """
+    return await conn.fetch(
+        """
+        SELECT ae.id, ae.alert_rule_id, ae.fired_at, ae.message,
+               ae.context, ae.delivered, ae.delivery_error
+        FROM alert_events ae
+        JOIN alert_rules ar ON ar.id = ae.alert_rule_id
+        WHERE ar.project_id = $1
+        ORDER BY ae.fired_at DESC
+        LIMIT $2
+        """,
+        project_id, limit,
+    )

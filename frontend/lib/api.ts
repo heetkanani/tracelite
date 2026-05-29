@@ -13,6 +13,11 @@ import type {
   EvalDefinitionCreatePayload,
   EvalDefinitionUpdatePayload,
   EvalRunSummary,
+  AlertRuleItem,
+  AlertRuleListResponse,
+  AlertRuleCreatePayload,
+  AlertRuleUpdatePayload,
+  AlertEventListResponse,
 } from "@/lib/types";
 
 // ----------------------------------------------------------------------
@@ -128,4 +133,53 @@ export async function runEval(
   return apiFetch<EvalRunSummary>(`/v1/evals/${evalId}/run?limit=${limit}`, {
     method: "POST",
   });
+}
+
+// ----------------------------------------------------------------------
+// Alerts
+// ----------------------------------------------------------------------
+
+export async function listAlerts(): Promise<AlertRuleListResponse> {
+  return apiFetch<AlertRuleListResponse>("/v1/alerts");
+}
+
+export async function createAlert(
+  payload: AlertRuleCreatePayload
+): Promise<AlertRuleItem> {
+  return apiFetch<AlertRuleItem>("/v1/alerts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAlert(
+  ruleId: string,
+  payload: AlertRuleUpdatePayload
+): Promise<AlertRuleItem> {
+  return apiFetch<AlertRuleItem>(`/v1/alerts/${ruleId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAlert(ruleId: string): Promise<void> {
+  return apiFetch<void>(`/v1/alerts/${ruleId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listAlertEvents(
+  limit: number = 50
+): Promise<AlertEventListResponse> {
+  return apiFetch<AlertEventListResponse>(`/v1/alert_events?limit=${limit}`);
+}
+
+export async function testAlert(ruleId: string): Promise<{
+  delivered: boolean;
+  error_message: string | null;
+  message: string;
+}> {
+  return apiFetch(`/v1/alerts/${ruleId}/test`, { method: "POST" });
 }

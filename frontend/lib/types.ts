@@ -118,3 +118,65 @@ export interface EvalResultItem {
   cost_usd: number;
   created_at: string;
 }
+
+// -----------------------------------------------------------
+// Alerts
+// -----------------------------------------------------------
+
+export type ConditionType =
+  | "eval_pass_rate_below"
+  | "trace_error_rate_above";
+
+export type DeliveryChannel = "log" | "slack_webhook" | "email";
+
+export interface AlertRuleItem {
+  id: string;
+  name: string;
+  condition_type: ConditionType;
+  config: Record<string, unknown>;
+  delivery_channel: DeliveryChannel;
+  delivery_config: Record<string, unknown>;
+  active: boolean;
+  min_resend_minutes: number;
+  last_evaluated_at: string | null;
+  last_fired_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertRuleListResponse {
+  items: AlertRuleItem[];
+}
+
+export interface AlertRuleCreatePayload {
+  name: string;
+  condition_type: ConditionType;
+  config: Record<string, unknown>;
+  delivery_channel: DeliveryChannel;
+  delivery_config: Record<string, unknown>;
+  active?: boolean;
+  min_resend_minutes?: number;
+}
+
+export interface AlertRuleUpdatePayload {
+  name?: string;
+  config?: Record<string, unknown>;
+  delivery_channel?: DeliveryChannel;
+  delivery_config?: Record<string, unknown>;
+  active?: boolean;
+  min_resend_minutes?: number;
+}
+
+export interface AlertEventItem {
+  id: string;
+  alert_rule_id: string;
+  fired_at: string;
+  message: string;
+  context: Record<string, unknown>;
+  delivered: boolean;
+  delivery_error: string | null;
+}
+
+export interface AlertEventListResponse {
+  items: AlertEventItem[];
+}

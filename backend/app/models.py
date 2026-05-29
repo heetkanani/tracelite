@@ -181,3 +181,70 @@ class EvalDefinitionUpdate(BaseModel):
     config: Optional[dict[str, Any]] = None
     applies_to_span_type: Optional[SpanType] = None
     active: Optional[bool] = None
+
+# -------------------------------------------------------------
+# Alerts
+# -------------------------------------------------------------
+
+ConditionType = Literal[
+    "eval_pass_rate_below",
+    "trace_error_rate_above",
+]
+
+DeliveryChannel = Literal["log", "slack_webhook", "email"]
+
+
+class AlertRuleCreate(BaseModel):
+    """Shape of an incoming alert rule from the user."""
+    name: str = Field(..., min_length=1, max_length=200)
+    condition_type: ConditionType
+    config: dict[str, Any] = Field(default_factory=dict)
+    delivery_channel: DeliveryChannel = "log"
+    delivery_config: dict[str, Any] = Field(default_factory=dict)
+    active: bool = True
+    min_resend_minutes: int = Field(default=60, ge=0, le=1440)  # 0-24h
+
+
+class AlertRuleItem(BaseModel):
+    """An alert rule as returned by the API."""
+    id: UUID
+    name: str
+    condition_type: ConditionType
+    config: dict[str, Any]
+    delivery_channel: DeliveryChannel
+    delivery_config: dict[str, Any]
+    active: bool
+    min_resend_minutes: int
+    last_evaluated_at: Optional[datetime] = None
+    last_fired_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AlertRuleListResponse(BaseModel):
+    items: list[AlertRuleItem]
+
+
+class AlertRuleUpdate(BaseModel):
+    """Patch payload — every field optional."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    config: Optional[dict[str, Any]] = None
+    delivery_channel: Optional[DeliveryChannel] = None
+    delivery_config: Optional[dict[str, Any]] = None
+    active: Optional[bool] = None
+    min_resend_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
+
+
+class AlertEventItem(BaseModel):
+    """One alert fire event."""
+    id: UUID
+    alert_rule_id: UUID
+    fired_at: datetime
+    message: str
+    context: dict[str, Any]
+    delivered: bool
+    delivery_error: Optional[str] = None
+
+
+class AlertEventListResponse(BaseModel):
+    items: list[AlertEventItem]

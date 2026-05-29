@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useFilters, filtersToApi, apiFiltersForFetch } from "@/lib/filters";
 import { FilterBar } from "@/components/traces/filter-bar";
+import { RecentAlertsWidget } from "@/components/alerts/recent-alerts-widget";
 
 export default function Home() {
   const { filters, hasActiveFilters, resetFilters } = useFilters();
@@ -24,11 +25,11 @@ export default function Home() {
   } = useInfiniteQuery({
     queryKey: ["traces", apiFilters],
     queryFn: ({ pageParam }) =>
-  listTraces({
-    limit: 50,
-    cursor: pageParam,
-    filters: apiFiltersForFetch(apiFilters),
-  }),
+      listTraces({
+        limit: 50,
+        cursor: pageParam,
+        filters: apiFiltersForFetch(apiFilters),
+      }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     refetchInterval: 5000,
@@ -54,6 +55,9 @@ export default function Home() {
         </div>
         <LiveIndicator active={isFetching && !isFetchingNextPage} />
       </div>
+
+      {/* Recent alerts widget — only renders if there are alerts in the last 24h */}
+      <RecentAlertsWidget />
 
       <FilterBar />
 
@@ -83,6 +87,7 @@ export default function Home() {
           />
         </div>
       )}
+
       {hasNextPage && (
         <div className="mt-6 text-center">
           <Button

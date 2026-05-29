@@ -11,19 +11,25 @@ from app.db import init_pool, close_pool, get_pool
 from app.routes.spans import router as spans_router
 from app.routes.traces import router as traces_router
 from app.routes.evals import router as evals_router
+from app.routes.alerts import router as alerts_router
+from app.alerts import start_alert_worker, stop_alert_worker
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Startup ---
     await init_pool()
     print("✅ Database pool initialized")
 
     await start_eval_worker()
     print("✅ Eval worker started")
 
-    yield  # app runs here
+    await start_alert_worker()
+    print("✅ Alert worker started")
 
-    # --- Shutdown ---
+    yield
+
+    await stop_alert_worker()
+    print("👋 Alert worker stopped")
+
     await stop_eval_worker()
     print("👋 Eval worker stopped")
 
@@ -51,6 +57,7 @@ app.add_middleware(
 app.include_router(spans_router)
 app.include_router(traces_router)
 app.include_router(evals_router)
+app.include_router(alerts_router)
 
 @app.get("/")
 async def root():
