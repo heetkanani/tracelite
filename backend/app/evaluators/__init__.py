@@ -14,6 +14,7 @@ from app.evaluators.base import (
 # Import implementation modules so their @register_evaluator decorators run.
 # (Import order doesn't matter; the registry is keyed by string.)
 from app.evaluators import rule_based  # noqa: F401
+from app.evaluators import llm_based   # noqa: F401
 
 __all__ = [
     "EvalOutcome",

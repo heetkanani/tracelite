@@ -22,6 +22,7 @@ export interface FilterState {
   status: StatusFilter;
   spanType: SpanTypeFilter;
   period: PeriodFilter;
+  failedOnly: boolean;
 }
 
 // ----------------------------------------------------------------------
@@ -32,6 +33,7 @@ const DEFAULTS: FilterState = {
   status: "all",
   spanType: "all",
   period: "all",
+  failedOnly: false,
 };
 
 function readFromParams(params: URLSearchParams): FilterState {
@@ -46,6 +48,7 @@ function readFromParams(params: URLSearchParams): FilterState {
       ["llm", "tool", "retrieval", "generic"] as const
     ) as SpanTypeFilter,
     period: get("period", ["1h", "24h", "7d"] as const) as PeriodFilter,
+    failedOnly: params.get("failed_only") === "true",
   };
 }
 
@@ -60,6 +63,8 @@ function writeToParams(
   else out.set("span_type", next.spanType);
   if (next.period === "all") out.delete("period");
   else out.set("period", next.period);
+  if (next.failedOnly) out.set("failed_only", "true");
+  else out.delete("failed_only");
   return out;
 }
 
@@ -86,6 +91,7 @@ export interface ApiFilterKey {
   status?: "ok" | "error";
   span_type?: "llm" | "tool" | "retrieval" | "generic";
   period?: PeriodFilter; // stable: "1h" not a timestamp
+  has_failed_eval?: boolean;
 }
 
 export function filtersToApi(state: FilterState): ApiFilterKey {
@@ -93,6 +99,7 @@ export function filtersToApi(state: FilterState): ApiFilterKey {
     status: state.status === "all" ? undefined : state.status,
     span_type: state.spanType === "all" ? undefined : state.spanType,
     period: state.period === "all" ? undefined : state.period,
+    has_failed_eval: state.failedOnly ? true : undefined,
   };
 }
 
@@ -105,6 +112,7 @@ export function apiFiltersForFetch(key: ApiFilterKey): TraceListFilters {
     status: key.status,
     span_type: key.span_type,
     since: key.period ? periodToSince(key.period) : undefined,
+    has_failed_eval: key.has_failed_eval,
   };
 }
 
@@ -137,7 +145,8 @@ export function useFilters() {
   const hasActiveFilters =
     filters.status !== "all" ||
     filters.spanType !== "all" ||
-    filters.period !== "all";
+    filters.period !== "all" ||
+    filters.failedOnly;
 
   const resetFilters = useCallback(
     () => router.replace("?", { scroll: false }),

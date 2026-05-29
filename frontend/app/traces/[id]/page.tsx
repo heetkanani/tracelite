@@ -9,6 +9,7 @@ import { getTrace } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { WaterfallView } from "@/components/traces/waterfall-view";
+import { groupEvalResultsBySpan } from "@/lib/waterfall";
 
 import {
   formatCost,
@@ -89,7 +90,10 @@ export default function TraceDetailPage() {
               This trace has no spans yet.
             </p>
           ) : (
-            <WaterfallView spans={data.spans} />
+            <WaterfallView
+              spans={data.spans}
+              evalResultsBySpan={groupEvalResultsBySpan(data.eval_results)}
+            />
           )}
         </>
       )}

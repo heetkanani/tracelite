@@ -3,14 +3,16 @@
 import { Badge } from "@/components/ui/badge";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { JsonBlock } from "@/components/traces/json-block";
-import type { SpanItem } from "@/lib/types";
+import type { EvalResultItem, SpanItem } from "@/lib/types";
 import { formatCost, formatDuration } from "@/lib/format";
 
-interface SpanCardProps {
+export function SpanCard({
+  span,
+  evalResults,
+}: {
   span: SpanItem;
-}
-
-export function SpanCard({ span }: SpanCardProps) {
+  evalResults?: EvalResultItem[];
+}) {
   // Show input/output sections only for spans that could meaningfully have them
   const hasIO = span.input !== undefined || span.output !== undefined;
 
@@ -50,6 +52,15 @@ export function SpanCard({ span }: SpanCardProps) {
           />
         )}
       </div>
+
+      {/* Eval result badges (only when present) */}
+      {evalResults && evalResults.length > 0 && (
+        <div className="px-4 pb-2 flex flex-wrap items-center gap-1.5">
+          {evalResults.map((result) => (
+            <EvalBadge key={result.result_id} result={result} />
+          ))}
+        </div>
+      )}
 
       {/* Error message */}
       {span.error_message && (
@@ -98,6 +109,39 @@ function Meta({
     <span>
       <span className="text-gray-400">{label}:</span>{" "}
       <span className={mono ? "font-mono" : ""}>{value}</span>
+    </span>
+  );
+}
+
+function EvalBadge({ result }: { result: EvalResultItem }) {
+  // Three states based on passed: pass / fail / skipped
+  const isPass = result.passed === true;
+  const isFail = result.passed === false;
+
+  const icon = isPass ? "✓" : isFail ? "✗" : "⊘";
+  const colorClasses = isPass
+    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+    : isFail
+    ? "bg-red-50 text-red-700 border-red-200"
+    : "bg-gray-50 text-gray-600 border-gray-200";
+
+  // Tooltip text — score, reasoning if present
+  const tooltipParts: string[] = [];
+  if (result.score !== null) {
+    tooltipParts.push(`Score: ${result.score.toFixed(2)}`);
+  }
+  if (result.reasoning) {
+    tooltipParts.push(result.reasoning);
+  }
+  const tooltip = tooltipParts.join(" · ") || result.eval_name;
+
+  return (
+    <span
+      title={tooltip}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${colorClasses}`}
+    >
+      <span className="font-mono">{icon}</span>
+      <span className="truncate max-w-[180px]">{result.eval_name}</span>
     </span>
   );
 }

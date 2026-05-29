@@ -1,4 +1,5 @@
 import type { SpanItem } from "@/lib/types";
+import type { EvalResultItem } from "@/lib/types";
 
 /**
  * A span enriched with its position in the trace tree.
@@ -18,6 +19,23 @@ export interface WaterfallNode {
 export interface WaterfallStats {
   totalDurationMs: number;  // span of the entire trace, in ms
   traceStartMs: number;     // epoch ms when the trace's earliest span started
+}
+
+
+/**
+ * Group an array of eval results by their span_id.
+ * Returns a Map for O(1) lookups while rendering each span.
+ */
+export function groupEvalResultsBySpan(
+  results: EvalResultItem[]
+): Map<string, EvalResultItem[]> {
+  const byspan = new Map<string, EvalResultItem[]>();
+  for (const r of results) {
+    const existing = byspan.get(r.span_id) ?? [];
+    existing.push(r);
+    byspan.set(r.span_id, existing);
+  }
+  return byspan;
 }
 
 /**
@@ -147,4 +165,23 @@ export function niceTicks(totalMs: number): number[] {
     ticks.push(t);
   }
   return ticks;
+}
+
+/**
+ * Rolls up a span's eval results into a single visual status.
+ *
+ *   "fail"   — at least one eval failed
+ *   "pass"   — at least one eval ran AND none failed
+ *   "none"   — nothing ran (skipped or absent)
+ */
+export function rollupEvalStatus(
+  results: EvalResultItem[] | undefined
+): "fail" | "pass" | "none" {
+  if (!results || results.length === 0) return "none";
+  let sawDecisive = false;
+  for (const r of results) {
+    if (r.passed === false) return "fail";
+    if (r.passed === true) sawDecisive = true;
+  }
+  return sawDecisive ? "pass" : "none";
 }

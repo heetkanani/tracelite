@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 
-import type { SpanItem } from "@/lib/types";
+import type { EvalResultItem, SpanItem } from "@/lib/types";
 import {
   buildWaterfall,
   flattenWaterfall,
   niceTicks,
+  rollupEvalStatus,
   type WaterfallNode,
   type WaterfallStats,
 } from "@/lib/waterfall";
@@ -15,9 +16,13 @@ import { SpanCard } from "@/components/traces/span-card";
 
 interface WaterfallViewProps {
   spans: SpanItem[];
+  evalResultsBySpan?: Map<string, EvalResultItem[]>;
 }
 
-export function WaterfallView({ spans }: WaterfallViewProps) {
+export function WaterfallView({
+  spans,
+  evalResultsBySpan,
+}: WaterfallViewProps) {
   // Track which span IDs the user has clicked to expand inline.
   // Set<string> for O(1) lookups; toggle by adding/removing entries.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -69,6 +74,7 @@ export function WaterfallView({ spans }: WaterfallViewProps) {
           showTooltipBelow={index < 2}
           isExpanded={expandedIds.has(node.span.id)}
           onToggle={() => toggleExpanded(node.span.id)}
+          evalResults={evalResultsBySpan?.get(node.span.id)}
         />
       ))}
     </div>
@@ -85,12 +91,14 @@ function WaterfallRow({
   showTooltipBelow,
   isExpanded,
   onToggle,
+  evalResults,
 }: {
   node: WaterfallNode;
   stats: WaterfallStats;
   showTooltipBelow: boolean;
   isExpanded: boolean;
   onToggle: () => void;
+  evalResults?: EvalResultItem[];
 }) {
   const { span, depth, startOffsetMs, durationMs } = node;
 
@@ -121,6 +129,7 @@ function WaterfallRow({
           </span>
           <SpanTypeDot type={span.span_type} isError={isError} />
           <span className="truncate text-gray-900">{span.name}</span>
+          <EvalStatusIndicator status={rollupEvalStatus(evalResults)} />
         </div>
 
         {/* Timeline track */}
@@ -151,7 +160,7 @@ function WaterfallRow({
           className="px-4 py-3 border-b last:border-b-0 bg-gray-50"
           style={{ paddingLeft: `${16 + depth * 16}px` }}
         >
-          <SpanCard span={span} />
+          <SpanCard span={span} evalResults={evalResults} />
         </div>
       )}
     </>
@@ -262,5 +271,33 @@ function TimeAxis({ stats }: { stats: WaterfallStats }) {
         );
       })}
     </div>
+  );
+}
+
+function EvalStatusIndicator({
+  status,
+}: {
+  status: "pass" | "fail" | "none";
+}) {
+  if (status === "none") return null;
+  if (status === "pass") {
+    return (
+      <span
+        title="All evals passed"
+        className="text-emerald-600 text-xs font-mono shrink-0"
+        aria-label="all evals passed"
+      >
+        ✓
+      </span>
+    );
+  }
+  return (
+    <span
+      title="One or more evals failed"
+      className="text-red-600 text-xs font-mono shrink-0"
+      aria-label="eval failed"
+    >
+      ✗
+    </span>
   );
 }

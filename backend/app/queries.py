@@ -168,6 +168,7 @@ async def list_traces(
     status: Optional[str] = None,           # 'ok' | 'error' | None
     span_type: Optional[str] = None,        # 'llm' | 'tool' | 'retrieval' | 'generic' | None
     since: Optional[datetime] = None,       # filter traces with started_at >= this
+    has_failed_eval: Optional[bool] = None, # True = only traces with eval failures
 ) -> list[asyncpg.Record]:
     """
     Return up to `limit` traces for a project, newest first, with aggregates.
@@ -176,6 +177,7 @@ async def list_traces(
       - status: only traces matching this aggregate status (computed via has_error)
       - span_type: only traces containing at least one span of this type
       - since: only traces started at or after this UTC datetime
+      - has_failed_eval: when True, only traces with at least one failed eval result
     """
     # Build parameter list dynamically. $1 is always project_id.
     params: list = [project_id]
@@ -210,6 +212,12 @@ async def list_traces(
     elif status == "ok":
         having_clauses.append("COALESCE(BOOL_OR(s.status = 'error'), false) = false")
 
+    # has_failed_eval is also an aggregate -> goes in HAVING.
+    if has_failed_eval is True:
+        having_clauses.append("COALESCE(BOOL_OR(er.passed = false), false) = true")
+    elif has_failed_eval is False:
+        having_clauses.append("COALESCE(BOOL_OR(er.passed = false), false) = false")
+
     # The LIMIT param is always last.
     params.append(limit)
     limit_placeholder = f"${len(params)}"
@@ -228,12 +236,14 @@ async def list_traces(
             t.user_id,
             t.session_id,
             t.metadata,
-            COUNT(s.id)::int                              AS span_count,
-            COALESCE(SUM(s.cost_usd), 0)::float           AS total_cost_usd,
-            MAX(s.duration_ms)                            AS max_duration_ms,
-            COALESCE(BOOL_OR(s.status = 'error'), false)  AS has_error
+            COUNT(DISTINCT s.id)::int                       AS span_count,
+            COALESCE(SUM(DISTINCT s.cost_usd), 0)::float    AS total_cost_usd,
+            MAX(s.duration_ms)                              AS max_duration_ms,
+            COALESCE(BOOL_OR(s.status = 'error'), false)    AS has_error,
+            COALESCE(BOOL_OR(er.passed = false), false)     AS has_failed_eval
         FROM traces t
         LEFT JOIN spans s ON s.trace_id = t.id
+        LEFT JOIN eval_results er ON er.span_id = s.id
         WHERE {where_sql}
         GROUP BY t.id
         {having_sql}
@@ -485,3 +495,37 @@ async def list_spans_for_eval_run(
         LIMIT $3
     """
     return await conn.fetch(sql, project_id, applies_to_span_type, limit)
+
+# -------------------------------------------------------------
+# Eval results — for a whole trace
+# -------------------------------------------------------------
+
+async def list_eval_results_for_trace(
+    conn: asyncpg.Connection,
+    trace_id: UUID,
+) -> list[asyncpg.Record]:
+    """
+    All eval results for every span in this trace, joined with the
+    eval definitions so the frontend has names and types ready to render.
+    """
+    return await conn.fetch(
+        """
+        SELECT
+            er.id              AS result_id,
+            er.span_id,
+            er.eval_id,
+            er.score,
+            er.passed,
+            er.reasoning,
+            er.cost_usd,
+            er.created_at,
+            ed.name            AS eval_name,
+            ed.evaluator_type  AS eval_type
+        FROM eval_results er
+        JOIN spans s ON s.id = er.span_id
+        JOIN eval_definitions ed ON ed.id = er.eval_id
+        WHERE s.trace_id = $1
+        ORDER BY er.created_at DESC
+        """,
+        trace_id,
+    )

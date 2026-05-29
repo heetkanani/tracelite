@@ -117,3 +117,119 @@ def regex_match(span_row: dict, config: dict) -> EvalOutcome:
         passed=matched,
         reasoning=None,
     )
+
+# ----------------------------------------------------------------------
+# json_schema: pass if the output matches a basic shape spec
+# ----------------------------------------------------------------------
+
+@register_evaluator("json_schema")
+def json_schema(span_row: dict, config: dict) -> EvalOutcome:
+    """
+    config = {
+        "type": "object",                       # optional: "object" | "array" | "string" | "number" | "boolean"
+        "required_keys": ["answer", "sources"], # optional: keys that must exist (for type=object)
+    }
+
+    Passes when the span's output matches all configured checks.
+    A minimalist subset of JSON Schema — enough to catch the common
+    "LLM returned the wrong shape" bug.
+    """
+    output = span_row.get("output")
+
+    # If the LLM auto-instrumentation captured an OpenAI response, the
+    # output is wrapped as {"role": "assistant", "content": "..."}.
+    # The user's *real* payload is in content (often a JSON string they
+    # asked the model to produce). Unwrap so the eval works as expected.
+    payload = _unwrap_content(output)
+
+    # Strings that look like JSON should be parsed first so we can check
+    # the parsed structure, not the wrapper string.
+    parsed = _maybe_parse_json(payload)
+    if parsed is None and payload is not None:
+        # Caller asked for schema validation on something that isn't JSON.
+        return EvalOutcome(
+            score=0.0,
+            passed=False,
+            reasoning="Output is not valid JSON",
+        )
+
+    target = parsed if parsed is not None else payload
+
+    # Check 1: expected top-level type
+    expected_type = config.get("type")
+    if expected_type:
+        actual_type = _json_type_of(target)
+        if actual_type != expected_type:
+            return EvalOutcome(
+                score=0.0,
+                passed=False,
+                reasoning=f"Expected type {expected_type}, got {actual_type}",
+            )
+
+    # Check 2: required keys (only meaningful for objects)
+    required_keys = config.get("required_keys")
+    if required_keys:
+        if not isinstance(target, dict):
+            return EvalOutcome(
+                score=0.0,
+                passed=False,
+                reasoning="required_keys check expects an object",
+            )
+        missing = [k for k in required_keys if k not in target]
+        if missing:
+            return EvalOutcome(
+                score=0.0,
+                passed=False,
+                reasoning=f"Missing required keys: {', '.join(missing)}",
+            )
+
+    return EvalOutcome(score=1.0, passed=True, reasoning=None)
+
+
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+
+def _unwrap_content(output: Any) -> Any:
+    """
+    OpenAI's instrumentation stores assistant messages as
+        {"role": "assistant", "content": "..."}.
+    For schema validation, we usually care about the content payload,
+    not the wrapper. If the shape matches, return content; else passthrough.
+    """
+    if isinstance(output, dict) and set(output.keys()) <= {"role", "content"} and "content" in output:
+        return output["content"]
+    return output
+
+
+def _maybe_parse_json(value: Any) -> Any:
+    """Try to parse a JSON string. Return None if it isn't a string or fails."""
+    import json
+    if not isinstance(value, str):
+        return value if not isinstance(value, str) else None
+    s = value.strip()
+    if not s:
+        return None
+    if s[0] not in "{[\"" and s not in ("true", "false", "null"):
+        return None
+    try:
+        return json.loads(s)
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def _json_type_of(value: Any) -> str:
+    """Map a Python value to its JSON Schema 'type' name."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):  # check before int — bool is a subclass of int
+        return "boolean"
+    if isinstance(value, int) or isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "unknown"

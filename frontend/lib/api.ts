@@ -8,42 +8,57 @@ import { config } from "@/lib/config";
 import type {
   TraceDetailResponse,
   TraceListResponse,
+  EvalDefinitionItem,
+  EvalDefinitionListResponse,
+  EvalDefinitionCreatePayload,
+  EvalDefinitionUpdatePayload,
+  EvalRunSummary,
 } from "@/lib/types";
 
-class ApiError extends Error {
+// ----------------------------------------------------------------------
+// Core fetch wrapper
+// ----------------------------------------------------------------------
+
+export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
+    this.name = "ApiError";
   }
 }
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const url = `${config.apiBaseUrl}${path}`;
-  const res = await fetch(url, {
-    ...init,
+export async function apiFetch<T>(
+  path: string,
+  opts: RequestInit = {}
+): Promise<T> {
+  const res = await fetch(`${config.apiBaseUrl}${path}`, {
+    ...opts,
     headers: {
+      ...opts.headers,
       "X-API-Key": config.apiKey,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
     },
   });
-
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
     throw new ApiError(
       res.status,
-      `API ${res.status} on ${path}: ${text || res.statusText}`
+      `API ${res.status} on ${path}: ${await res.text()}`
     );
   }
-
-  return res.json() as Promise<T>;
+  // 204 No Content has no body — return void without parsing.
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return (await res.json()) as T;
 }
 
-// -------- Trace list -----------------------------------------------------
+// ----------------------------------------------------------------------
+// Traces
+// ----------------------------------------------------------------------
 
 export interface TraceListFilters {
   status?: "ok" | "error";
   span_type?: "llm" | "tool" | "retrieval" | "generic";
   since?: string; // ISO 8601 UTC datetime
+  has_failed_eval?: boolean;
 }
 
 export async function listTraces(params?: {
@@ -57,12 +72,60 @@ export async function listTraces(params?: {
   if (params?.filters?.status) qs.set("status", params.filters.status);
   if (params?.filters?.span_type) qs.set("span_type", params.filters.span_type);
   if (params?.filters?.since) qs.set("since", params.filters.since);
+  if (params?.filters?.has_failed_eval !== undefined) {
+    qs.set("has_failed_eval", String(params.filters.has_failed_eval));
+  }
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiFetch<TraceListResponse>(`/v1/traces${suffix}`);
 }
 
-// -------- Trace detail ---------------------------------------------------
-
 export async function getTrace(traceId: string): Promise<TraceDetailResponse> {
   return apiFetch<TraceDetailResponse>(`/v1/traces/${traceId}`);
+}
+
+// ----------------------------------------------------------------------
+// Evaluations
+// ----------------------------------------------------------------------
+
+export async function listEvals(params?: {
+  activeOnly?: boolean;
+}): Promise<EvalDefinitionListResponse> {
+  const qs = params?.activeOnly ? "?active_only=true" : "";
+  return apiFetch<EvalDefinitionListResponse>(`/v1/evals${qs}`);
+}
+
+export async function createEval(
+  payload: EvalDefinitionCreatePayload
+): Promise<EvalDefinitionItem> {
+  return apiFetch<EvalDefinitionItem>("/v1/evals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateEval(
+  evalId: string,
+  payload: EvalDefinitionUpdatePayload
+): Promise<EvalDefinitionItem> {
+  return apiFetch<EvalDefinitionItem>(`/v1/evals/${evalId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteEval(evalId: string): Promise<void> {
+  return apiFetch<void>(`/v1/evals/${evalId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function runEval(
+  evalId: string,
+  limit: number = 100
+): Promise<EvalRunSummary> {
+  return apiFetch<EvalRunSummary>(`/v1/evals/${evalId}/run?limit=${limit}`, {
+    method: "POST",
+  });
 }

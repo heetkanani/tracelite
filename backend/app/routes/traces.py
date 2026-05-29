@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Header, Query
 
 from app.db import get_pool
 from app.models import (
+    EvalResultItem,
     SpanItem,
     TraceDetailResponse,
     TraceListItem,
@@ -20,6 +21,7 @@ from app.pagination import encode_cursor, parse_optional_cursor
 from app.queries import (
     get_project_by_api_key,
     get_trace_by_id,
+    list_eval_results_for_trace,
     list_spans_for_trace,
     list_traces,
 )
@@ -46,6 +48,10 @@ async def list_traces_endpoint(
         default=None,
         description="Include only traces started at or after this UTC datetime",
     ),
+    has_failed_eval: Optional[bool] = Query(
+        default=None,
+        description="When true, only traces with at least one failed eval result",
+    ),
 ) -> TraceListResponse:
     """List traces newest-first, cursor-paginated, with optional filters."""
     pool = get_pool()
@@ -65,6 +71,7 @@ async def list_traces_endpoint(
             status=status,
             span_type=span_type,
             since=since,
+            has_failed_eval=has_failed_eval,
         )
 
     items = [TraceListItem(**dict(r)) for r in rows]
@@ -83,7 +90,7 @@ async def get_trace_endpoint(
     trace_id: UUID,
     x_api_key: Annotated[str, Header(alias="X-API-Key")],
 ) -> TraceDetailResponse:
-    """Fetch one trace and all its spans."""
+    """Fetch one trace and all its spans, plus any eval results."""
     pool = get_pool()
 
     async with pool.acquire() as conn:
@@ -98,8 +105,10 @@ async def get_trace_endpoint(
             raise HTTPException(status_code=404, detail="Trace not found")
 
         span_rows = await list_spans_for_trace(conn, trace_id=trace_id)
+        eval_result_rows = await list_eval_results_for_trace(conn, trace_id)
 
     return TraceDetailResponse(
         trace=TraceListItem(**dict(trace_row)),
         spans=[SpanItem(**dict(r)) for r in span_rows],
+        eval_results=[EvalResultItem(**dict(r)) for r in eval_result_rows],
     )

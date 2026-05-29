@@ -42,7 +42,7 @@ export default function Home() {
     <main className="min-h-screen p-8 max-w-6xl mx-auto">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">tracelite</h1>
+          <h1 className="text-2xl font-semibold">Traces</h1>
           <p className="text-sm text-gray-500">
             Recent traces
             {data && (

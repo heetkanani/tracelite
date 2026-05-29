@@ -22,6 +22,8 @@ export interface TraceListItem {
   total_cost_usd: number;
   max_duration_ms: number | null;
   has_error: boolean;
+  has_failed_eval: boolean;
+
 }
 
 export interface TraceListResponse {
@@ -52,4 +54,67 @@ export interface SpanItem {
 export interface TraceDetailResponse {
   trace: TraceListItem;
   spans: SpanItem[];
+  eval_results: EvalResultItem[];
+}
+
+// -----------------------------------------------------------
+// Evaluations
+// -----------------------------------------------------------
+
+export type EvaluatorType =
+  | "regex_match"
+  | "substring_absent"
+  | "json_schema"
+  | "llm_judge";
+
+export interface EvalDefinitionItem {
+  id: string;
+  name: string;
+  evaluator_type: EvaluatorType;
+  config: Record<string, unknown>;
+  applies_to_span_type: SpanType | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvalDefinitionListResponse {
+  items: EvalDefinitionItem[];
+}
+
+export interface EvalDefinitionCreatePayload {
+  name: string;
+  evaluator_type: EvaluatorType;
+  config: Record<string, unknown>;
+  applies_to_span_type?: SpanType | null;
+  active?: boolean;
+}
+
+export interface EvalDefinitionUpdatePayload {
+  name?: string;
+  config?: Record<string, unknown>;
+  applies_to_span_type?: SpanType | null;
+  active?: boolean;
+}
+
+export interface EvalRunSummary {
+  evaluated: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  total_cost_usd: number;
+  reason?: string;
+}
+
+export interface EvalResultItem {
+  result_id: string;
+  span_id: string;
+  eval_id: string;
+  eval_name: string;
+  eval_type: EvaluatorType;
+  score: number | null;
+  passed: boolean | null;
+  reasoning: string | null;
+  cost_usd: number;
+  created_at: string;
 }

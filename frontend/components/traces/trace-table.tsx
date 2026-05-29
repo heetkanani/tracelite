@@ -70,7 +70,7 @@ export function TraceTable({
           <TableHead className="text-right w-[80px]">Spans</TableHead>
           <TableHead className="text-right w-[100px]">Duration</TableHead>
           <TableHead className="text-right w-[120px]">Cost</TableHead>
-          <TableHead className="w-[80px]">Status</TableHead>
+          <TableHead className="w-[100px]">Status</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -98,11 +98,22 @@ export function TraceTable({
               {formatCost(t.total_cost_usd)}
             </TableCell>
             <TableCell>
-              {t.has_error ? (
-                <Badge variant="destructive">error</Badge>
-              ) : (
-                <Badge variant="secondary">ok</Badge>
-              )}
+              <div className="flex items-center gap-1.5">
+                {t.has_error ? (
+                  <Badge variant="destructive">error</Badge>
+                ) : (
+                  <Badge variant="secondary">ok</Badge>
+                )}
+                {t.has_failed_eval && (
+                  <span
+                    title="One or more evals failed"
+                    className="text-red-600 text-xs font-mono"
+                    aria-label="eval failed"
+                  >
+                    ✗
+                  </span>
+                )}
+              </div>
             </TableCell>
           </TableRow>
         ))}

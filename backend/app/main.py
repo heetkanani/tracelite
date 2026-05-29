@@ -6,6 +6,7 @@ Run with: uvicorn app.main:app --reload --port 8000
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.evaluations import start_eval_worker, stop_eval_worker
 from app.db import init_pool, close_pool, get_pool
 from app.routes.spans import router as spans_router
 from app.routes.traces import router as traces_router
@@ -13,17 +14,19 @@ from app.routes.evals import router as evals_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Manage the database pool's lifecycle alongside the app's.
-
-    - On startup: open the asyncpg pool.
-    - On shutdown: close it cleanly so no connections leak.
-    """
-    # Startup
+    # --- Startup ---
     await init_pool()
     print("✅ Database pool initialized")
-    yield
-    # Shutdown
+
+    await start_eval_worker()
+    print("✅ Eval worker started")
+
+    yield  # app runs here
+
+    # --- Shutdown ---
+    await stop_eval_worker()
+    print("👋 Eval worker stopped")
+
     await close_pool()
     print("👋 Database pool closed")
 

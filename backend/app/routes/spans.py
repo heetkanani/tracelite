@@ -5,6 +5,7 @@ Accepts a single span from the SDK, ensures its trace exists,
 inserts the span, and returns the new ID.
 """
 from fastapi import APIRouter, HTTPException, Header
+from app.evaluations import enqueue_span_for_eval
 from typing import Annotated
 
 from app.db import get_pool
@@ -47,5 +48,11 @@ async def create_span(
                 started_at=span.started_at,
             )
             span_id = await insert_span(conn, span)
+
+    # Background evaluation: fire-and-forget enqueue.
+    # If the worker isn't running yet (e.g. early in startup), the
+    # span still lands in the queue and gets evaluated whenever
+    # the worker drains it.
+    await enqueue_span_for_eval(str(span_id))
 
     return SpanResponse(id=span_id, trace_id=span.trace_id)

@@ -12,11 +12,17 @@ from pydantic import BaseModel, Field
 
 
 # -------------------------------------------------------------
-# Span ingestion
+# Shared literal types — defined first so other models can use them
 # -------------------------------------------------------------
 
 SpanType = Literal["llm", "tool", "retrieval", "generic"]
 SpanStatus = Literal["ok", "error"]
+EvaluatorType = Literal["regex_match", "substring_absent", "json_schema", "llm_judge"]
+
+
+# -------------------------------------------------------------
+# Span ingestion
+# -------------------------------------------------------------
 
 class SpanCreate(BaseModel):
     """
@@ -61,9 +67,9 @@ class SpanCreate(BaseModel):
 
 class SpanResponse(BaseModel):
     """Shape of the response we send back after creating a span."""
-
     id: UUID
     trace_id: UUID
+
 
 # -------------------------------------------------------------
 # Trace listing & detail
@@ -86,6 +92,8 @@ class TraceListItem(BaseModel):
     total_cost_usd: float = 0.0
     max_duration_ms: Optional[int] = None
     has_error: bool = False
+    has_failed_eval: bool = False
+
 
 
 class TraceListResponse(BaseModel):
@@ -115,17 +123,30 @@ class SpanItem(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class EvalResultItem(BaseModel):
+    """One eval result, with denormalized eval name and type for display."""
+    result_id: UUID
+    span_id: UUID
+    eval_id: UUID
+    eval_name: str
+    eval_type: EvaluatorType
+    score: Optional[float] = None
+    passed: Optional[bool] = None
+    reasoning: Optional[str] = None
+    cost_usd: float = 0.0
+    created_at: datetime
+
+
 class TraceDetailResponse(BaseModel):
-    """One trace with all its spans."""
+    """One trace with all its spans, plus any eval results across the trace."""
     trace: TraceListItem
     spans: list[SpanItem]
+    eval_results: list[EvalResultItem] = Field(default_factory=list)
+
 
 # -------------------------------------------------------------
-# Evaluations
+# Evaluations — definitions (CRUD)
 # -------------------------------------------------------------
-
-EvaluatorType = Literal["regex_match", "substring_absent", "json_schema", "llm_judge"]
-
 
 class EvalDefinitionCreate(BaseModel):
     """Shape of an incoming eval definition from the user."""

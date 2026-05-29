@@ -68,6 +68,17 @@ export function FilterBar() {
         onChange={(v) => setFilters({ period: v as PeriodFilter })}
       />
 
+      {/* Failed-evals toggle */}
+      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer ml-2 h-9 px-3 rounded-md border bg-white">
+        <input
+          type="checkbox"
+          checked={filters.failedOnly}
+          onChange={(e) => setFilters({ failedOnly: e.target.checked })}
+          className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+        />
+        <span>Failed evals only</span>
+      </label>
+
       {hasActiveFilters && (
         <Button
           variant="ghost"
