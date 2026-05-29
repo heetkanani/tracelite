@@ -4,13 +4,17 @@ HTTP routes for alert rules and events.
 Users create rules here. The background worker (added in 7.2)
 evaluates them periodically and writes to alert_events on fire.
 Events are read-only via this API.
+
+Authentication: accepts either an X-API-Key header or a session cookie.
 """
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.alert_delivery import deliver_alert
 from app.db import get_pool
+from app.dependencies import AuthContext, get_current_auth, resolve_project_id
 from app.models import (
     AlertEventItem,
     AlertEventListResponse,
@@ -22,14 +26,12 @@ from app.models import (
 from app.queries import (
     delete_alert_rule,
     get_alert_rule,
-    get_project_by_api_key,
+    insert_alert_event,
     insert_alert_rule,
     list_alert_events,
     list_alert_rules,
     update_alert_rule,
 )
-from app.alert_delivery import deliver_alert
-from app.queries import insert_alert_event
 
 router = APIRouter(prefix="/v1", tags=["alerts"])
 
@@ -41,18 +43,16 @@ router = APIRouter(prefix="/v1", tags=["alerts"])
 @router.post("/alerts", response_model=AlertRuleItem, status_code=201)
 async def create_alert_endpoint(
     payload: AlertRuleCreate,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> AlertRuleItem:
     """Create a new alert rule."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
         row = await insert_alert_rule(
             conn,
-            project_id=project["id"],
+            project_id=project_id,
             name=payload.name,
             condition_type=payload.condition_type,
             config=payload.config,
@@ -71,19 +71,17 @@ async def create_alert_endpoint(
 
 @router.get("/alerts", response_model=AlertRuleListResponse)
 async def list_alerts_endpoint(
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
     active_only: bool = Query(default=False),
 ) -> AlertRuleListResponse:
     """List alert rules for the project."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
         rows = await list_alert_rules(
             conn,
-            project_id=project["id"],
+            project_id=project_id,
             active_only=active_only,
         )
 
@@ -98,16 +96,14 @@ async def list_alerts_endpoint(
 @router.get("/alerts/{rule_id}", response_model=AlertRuleItem)
 async def get_alert_endpoint(
     rule_id: UUID,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> AlertRuleItem:
     """Fetch one alert rule."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
-        row = await get_alert_rule(conn, rule_id, project["id"])
+        row = await get_alert_rule(conn, rule_id, project_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Alert rule not found")
 
@@ -122,19 +118,17 @@ async def get_alert_endpoint(
 async def update_alert_endpoint(
     rule_id: UUID,
     payload: AlertRuleUpdate,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> AlertRuleItem:
     """Update an alert rule. Only provided fields change."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
         row = await update_alert_rule(
             conn,
             rule_id=rule_id,
-            project_id=project["id"],
+            project_id=project_id,
             name=payload.name,
             config=payload.config,
             delivery_channel=payload.delivery_channel,
@@ -155,16 +149,14 @@ async def update_alert_endpoint(
 @router.delete("/alerts/{rule_id}", status_code=204)
 async def delete_alert_endpoint(
     rule_id: UUID,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> None:
     """Delete an alert rule. Cascades to its events."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
-        deleted = await delete_alert_rule(conn, rule_id, project["id"])
+        deleted = await delete_alert_rule(conn, rule_id, project_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Alert rule not found")
 
@@ -175,17 +167,15 @@ async def delete_alert_endpoint(
 
 @router.get("/alert_events", response_model=AlertEventListResponse)
 async def list_alert_events_endpoint(
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
     limit: int = Query(default=50, ge=1, le=200),
 ) -> AlertEventListResponse:
     """List recent alert events for the project, newest first."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
-        rows = await list_alert_events(conn, project["id"], limit=limit)
+        rows = await list_alert_events(conn, project_id, limit=limit)
 
     items = [AlertEventItem(**dict(r)) for r in rows]
     return AlertEventListResponse(items=items)
@@ -198,7 +188,7 @@ async def list_alert_events_endpoint(
 @router.post("/alerts/{rule_id}/test")
 async def test_alert_endpoint(
     rule_id: UUID,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> dict:
     """
     Fire this alert immediately with a synthetic message. Useful for
@@ -211,11 +201,9 @@ async def test_alert_endpoint(
     """
     pool = get_pool()
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
-        rule = await get_alert_rule(conn, rule_id, project["id"])
+        rule = await get_alert_rule(conn, rule_id, project_id)
         if rule is None:
             raise HTTPException(status_code=404, detail="Alert rule not found")
 

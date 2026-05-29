@@ -13,6 +13,7 @@ from app.routes.traces import router as traces_router
 from app.routes.evals import router as evals_router
 from app.routes.alerts import router as alerts_router
 from app.alerts import start_alert_worker, stop_alert_worker
+from app.routes.auth import router as auth_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,6 +59,7 @@ app.include_router(spans_router)
 app.include_router(traces_router)
 app.include_router(evals_router)
 app.include_router(alerts_router)
+app.include_router(auth_router)
 
 @app.get("/")
 async def root():

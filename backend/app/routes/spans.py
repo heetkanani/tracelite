@@ -3,15 +3,19 @@ Span ingestion route: POST /v1/spans
 
 Accepts a single span from the SDK, ensures its trace exists,
 inserts the span, and returns the new ID.
+
+Authentication: accepts either an X-API-Key header (SDK calls) or a
+session cookie. SDK ingestion almost always uses the API key path.
 """
-from fastapi import APIRouter, HTTPException, Header
-from app.evaluations import enqueue_span_for_eval
 from typing import Annotated
 
+from fastapi import APIRouter, Depends
+
 from app.db import get_pool
+from app.dependencies import AuthContext, get_current_auth, resolve_project_id
+from app.evaluations import enqueue_span_for_eval
 from app.models import SpanCreate, SpanResponse
 from app.queries import (
-    get_project_by_api_key,
     ensure_trace_exists,
     insert_span,
 )
@@ -23,7 +27,7 @@ router = APIRouter(prefix="/v1", tags=["spans"])
 @router.post("/spans", response_model=SpanResponse, status_code=201)
 async def create_span(
     span: SpanCreate,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> SpanResponse:
     """
     Ingest a single span.
@@ -34,17 +38,15 @@ async def create_span(
     pool = get_pool()
 
     async with pool.acquire() as conn:
-        # 1. Validate the API key by looking up its project
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        # 1. Resolve the project from auth context (API key or session)
+        project_id = await resolve_project_id(auth, conn)
 
         # 2. Insert the trace (if new) and the span — atomically
         async with conn.transaction():
             await ensure_trace_exists(
                 conn,
                 trace_id=span.trace_id,
-                project_id=project["id"],
+                project_id=project_id,
                 started_at=span.started_at,
             )
             span_id = await insert_span(conn, span)

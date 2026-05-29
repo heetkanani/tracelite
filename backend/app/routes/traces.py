@@ -3,13 +3,18 @@ Trace listing & detail routes.
 
 GET /v1/traces           — paginated list, newest first
 GET /v1/traces/{id}      — one trace with all its spans
+
+Authentication: accepts either an X-API-Key header (SDK calls) or a
+session cookie (dashboard). Both resolve to a (user, project) pair
+via the get_current_auth dependency.
 """
 from typing import Annotated, Optional
 from uuid import UUID
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db import get_pool
+from app.dependencies import AuthContext, get_current_auth, resolve_project_id
 from app.models import (
     EvalResultItem,
     SpanItem,
@@ -19,7 +24,6 @@ from app.models import (
 )
 from app.pagination import encode_cursor, parse_optional_cursor
 from app.queries import (
-    get_project_by_api_key,
     get_trace_by_id,
     list_eval_results_for_trace,
     list_spans_for_trace,
@@ -31,7 +35,7 @@ router = APIRouter(prefix="/v1", tags=["traces"])
 
 @router.get("/traces", response_model=TraceListResponse)
 async def list_traces_endpoint(
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
     cursor: Optional[str] = Query(default=None),
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     status: Optional[str] = Query(
@@ -59,13 +63,11 @@ async def list_traces_endpoint(
     parsed_cursor = parse_optional_cursor(cursor)
 
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
         rows = await list_traces(
             conn,
-            project_id=project["id"],
+            project_id=project_id,
             cursor=parsed_cursor,
             limit=limit,
             status=status,
@@ -88,18 +90,16 @@ async def list_traces_endpoint(
 @router.get("/traces/{trace_id}", response_model=TraceDetailResponse)
 async def get_trace_endpoint(
     trace_id: UUID,
-    x_api_key: Annotated[str, Header(alias="X-API-Key")],
+    auth: Annotated[AuthContext, Depends(get_current_auth)],
 ) -> TraceDetailResponse:
     """Fetch one trace and all its spans, plus any eval results."""
     pool = get_pool()
 
     async with pool.acquire() as conn:
-        project = await get_project_by_api_key(conn, x_api_key)
-        if project is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        project_id = await resolve_project_id(auth, conn)
 
         trace_row = await get_trace_by_id(
-            conn, trace_id=trace_id, project_id=project["id"]
+            conn, trace_id=trace_id, project_id=project_id
         )
         if trace_row is None:
             raise HTTPException(status_code=404, detail="Trace not found")

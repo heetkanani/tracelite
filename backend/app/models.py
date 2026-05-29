@@ -248,3 +248,32 @@ class AlertEventItem(BaseModel):
 
 class AlertEventListResponse(BaseModel):
     items: list[AlertEventItem]
+
+
+# -------------------------------------------------------------
+# Auth
+# -------------------------------------------------------------
+
+class SignupRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=200)
+    password: str = Field(..., min_length=8, max_length=200)
+    name: Optional[str] = Field(default=None, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=200)
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class UserResponse(BaseModel):
+    """Public user info returned by auth endpoints."""
+    id: UUID
+    email: str
+    name: Optional[str] = None
+
+
+class SessionResponse(BaseModel):
+    """Result of a successful signup or login."""
+    user: UserResponse
+    token: str
+    expires_at: datetime

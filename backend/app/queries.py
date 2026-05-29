@@ -20,11 +20,37 @@ async def get_project_by_api_key(
     conn: asyncpg.Connection,
     api_key: str,
 ) -> Optional[asyncpg.Record]:
-    """Return the project row matching this API key, or None."""
-    return await conn.fetchrow(
-        "SELECT id, name FROM projects WHERE api_key = $1",
+    """
+    Return the project row matching this API key, or None.
+
+    Looks up through api_keys (post-migration) and skips revoked keys.
+    Also touches last_used_at as a side effect — cheap usage tracking
+    that the future "API keys" settings UI will surface.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT p.id, p.name, p.owner_user_id, ak.id AS api_key_id
+        FROM api_keys ak
+        JOIN projects p ON p.id = ak.project_id
+        WHERE ak.key = $1
+          AND ak.revoked_at IS NULL
+        """,
         api_key,
     )
+    if row is None:
+        return None
+
+    # Fire-and-forget last_used_at update. Don't block the request on this.
+    # If the UPDATE fails for some reason, the caller still gets the row.
+    try:
+        await conn.execute(
+            "UPDATE api_keys SET last_used_at = now() WHERE id = $1",
+            row["api_key_id"],
+        )
+    except Exception:
+        pass
+
+    return row
 
 
 # -------------------------------------------------------------
@@ -760,4 +786,147 @@ async def list_alert_events(
         LIMIT $2
         """,
         project_id, limit,
+    )
+
+# -------------------------------------------------------------
+# Auth — users
+# -------------------------------------------------------------
+
+async def insert_user(
+    conn: asyncpg.Connection,
+    email: str,
+    password_hash: str,
+    name: Optional[str],
+) -> asyncpg.Record:
+    """Insert a new user. Email is normalized to lowercase before storage."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO users (email, password_hash, name)
+        VALUES (lower($1), $2, $3)
+        RETURNING id, email, name, created_at
+        """,
+        email, password_hash, name,
+    )
+
+
+async def get_user_by_email(
+    conn: asyncpg.Connection,
+    email: str,
+) -> Optional[asyncpg.Record]:
+    """Look up a user by email (case-insensitive). Returns full row incl. password_hash."""
+    return await conn.fetchrow(
+        """
+        SELECT id, email, password_hash, name, created_at
+        FROM users
+        WHERE lower(email) = lower($1)
+        """,
+        email,
+    )
+
+
+async def get_user_by_id(
+    conn: asyncpg.Connection,
+    user_id: UUID,
+) -> Optional[asyncpg.Record]:
+    """Fetch a user by id. Used by session validation."""
+    return await conn.fetchrow(
+        """
+        SELECT id, email, name, created_at
+        FROM users
+        WHERE id = $1
+        """,
+        user_id,
+    )
+
+
+# -------------------------------------------------------------
+# Auth — sessions
+# -------------------------------------------------------------
+
+async def insert_session(
+    conn: asyncpg.Connection,
+    user_id: UUID,
+    token: str,
+    expires_at: datetime,
+) -> asyncpg.Record:
+    """Create a new session row for this user."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO sessions (user_id, token, expires_at)
+        VALUES ($1, $2, $3)
+        RETURNING id, user_id, token, expires_at, created_at
+        """,
+        user_id, token, expires_at,
+    )
+
+
+async def get_session_by_token(
+    conn: asyncpg.Connection,
+    token: str,
+) -> Optional[asyncpg.Record]:
+    """
+    Look up an active session by token.
+
+    Skips expired sessions automatically — callers can treat the response
+    as 'has a valid session' without re-checking expires_at.
+    """
+    return await conn.fetchrow(
+        """
+        SELECT s.id, s.user_id, s.token, s.expires_at,
+               u.email, u.name
+        FROM sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token = $1
+          AND s.expires_at > now()
+        """,
+        token,
+    )
+
+
+async def touch_session(
+    conn: asyncpg.Connection,
+    session_id: UUID,
+) -> None:
+    """Update last_seen_at = now(). Called per-request to track activity."""
+    await conn.execute(
+        "UPDATE sessions SET last_seen_at = now() WHERE id = $1",
+        session_id,
+    )
+
+
+async def delete_session(
+    conn: asyncpg.Connection,
+    token: str,
+) -> None:
+    """Logout: revoke this session by deleting the row."""
+    await conn.execute(
+        "DELETE FROM sessions WHERE token = $1",
+        token,
+    )
+
+# -------------------------------------------------------------
+# Project lookup by user — for cookie-authenticated requests
+# -------------------------------------------------------------
+
+async def get_user_default_project(
+    conn: asyncpg.Connection,
+    user_id: UUID,
+) -> Optional[asyncpg.Record]:
+    """
+    Return the user's project (the first one created).
+
+    For v1, each user has exactly one project. Cookie-authenticated
+    requests use this to discover which project to operate on.
+    When multi-project UI lands in Step 9, this gets replaced by
+    an explicit ?project_id= param + verification of ownership.
+    """
+    return await conn.fetchrow(
+        """
+        SELECT id, name, owner_user_id
+        FROM projects
+        WHERE owner_user_id = $1
+        ORDER BY created_at ASC
+        LIMIT 1
+        """,
+        user_id,
     )

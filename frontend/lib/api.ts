@@ -1,8 +1,13 @@
 /**
  * API client for the tracelite backend.
  *
- * Wraps fetch with auth headers and JSON parsing.
+ * Wraps fetch with auth handling and JSON parsing.
  * Every function returns a typed promise.
+ *
+ * Authentication: sends cookies (credentials: "include") so the
+ * tracelite_session cookie set by /v1/auth/login is automatically
+ * attached. The X-API-Key header is only used for SDK ingestion paths;
+ * the dashboard relies on the session cookie alone.
  */
 import { config } from "@/lib/config";
 import type {
@@ -18,10 +23,14 @@ import type {
   AlertRuleCreatePayload,
   AlertRuleUpdatePayload,
   AlertEventListResponse,
+  UserResponse,
+  SessionResponse,
+  SignupRequest,
+  LoginRequest,
 } from "@/lib/types";
 
 // ----------------------------------------------------------------------
-// Core fetch wrapper
+// Errors
 // ----------------------------------------------------------------------
 
 export class ApiError extends Error {
@@ -31,27 +40,59 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Thrown specifically on 401 responses. The auth provider catches this
+ * and redirects to /login. Routes that handle 401 themselves (e.g.,
+ * /login checking if the user is already logged in) can catch this
+ * subclass and ignore it.
+ */
+export class UnauthorizedError extends ApiError {
+  constructor(message: string) {
+    super(401, message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+// ----------------------------------------------------------------------
+// Core fetch wrapper
+// ----------------------------------------------------------------------
+
 export async function apiFetch<T>(
   path: string,
   opts: RequestInit = {}
 ): Promise<T> {
   const res = await fetch(`${config.apiBaseUrl}${path}`, {
     ...opts,
+    credentials: "include", // send tracelite_session cookie
     headers: {
       ...opts.headers,
-      "X-API-Key": config.apiKey,
     },
   });
+
+  if (res.status === 401) {
+    // Try to surface the server's detail; fall back to a generic message.
+    let detail = "Not authenticated";
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // Body not JSON — keep generic.
+    }
+    throw new UnauthorizedError(detail);
+  }
+
   if (!res.ok) {
     throw new ApiError(
       res.status,
       `API ${res.status} on ${path}: ${await res.text()}`
     );
   }
+
   // 204 No Content has no body — return void without parsing.
   if (res.status === 204) {
     return undefined as T;
   }
+
   return (await res.json()) as T;
 }
 
@@ -182,4 +223,38 @@ export async function testAlert(ruleId: string): Promise<{
   message: string;
 }> {
   return apiFetch(`/v1/alerts/${ruleId}/test`, { method: "POST" });
+}
+
+// ----------------------------------------------------------------------
+// Auth
+// ----------------------------------------------------------------------
+
+export async function signup(
+  payload: SignupRequest
+): Promise<SessionResponse> {
+  return apiFetch<SessionResponse>("/v1/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function login(
+  payload: LoginRequest
+): Promise<SessionResponse> {
+  return apiFetch<SessionResponse>("/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function logout(): Promise<void> {
+  return apiFetch<void>("/v1/auth/logout", {
+    method: "POST",
+  });
+}
+
+export async function getMe(): Promise<UserResponse> {
+  return apiFetch<UserResponse>("/v1/auth/me");
 }

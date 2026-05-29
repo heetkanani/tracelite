@@ -180,3 +180,30 @@ export interface AlertEventItem {
 export interface AlertEventListResponse {
   items: AlertEventItem[];
 }
+
+// -----------------------------------------------------------
+// Auth
+// -----------------------------------------------------------
+
+export interface UserResponse {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export interface SessionResponse {
+  user: UserResponse;
+  token: string;
+  expires_at: string;
+}
+
+export interface SignupRequest {
+  email: string;
+  password: string;
+  name?: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
