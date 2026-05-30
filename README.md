@@ -1,6 +1,6 @@
-# tracelite
+# Tracelite AI
 
-Open-source observability for LLM applications. Think Datadog — but built specifically for AI.
+Open-source observability for LLM applications. Think Datadog - but built specifically for AI.
 
 tracelite sits between your app and your LLM, capturing every prompt, response, cost, and latency so you can debug, evaluate, and monitor your AI in production.
 
@@ -8,13 +8,13 @@ tracelite sits between your app and your LLM, capturing every prompt, response, 
 
 ## Features
 
-- **Trace & span ingestion** — capture LLM calls, tool use, and agent steps via a simple SDK
-- **Cost tracking** — see per-trace and per-span USD cost at a glance
-- **Latency monitoring** — track duration across every span in your pipeline
-- **Evaluations** — run automated checks (regex, JSON schema, LLM-as-judge) on every new trace
-- **Alerts** — get notified when pass rate drops, cost spikes, or errors exceed a threshold
-- **Authentication** — email/password login, session cookies, per-project API keys
-- **Self-hosted** — your data stays on your infrastructure
+- **Trace & span ingestion** - capture LLM calls, tool use, and agent steps via a simple SDK
+- **Cost tracking** - see per-trace and per-span USD cost at a glance
+- **Latency monitoring** - track duration across every span in your pipeline
+- **Evaluations** - run automated checks (regex, JSON schema, LLM-as-judge) on every new trace
+- **Alerts** - get notified when pass rate drops, cost spikes, or errors exceed a threshold
+- **Authentication** - email/password login, session cookies, per-project API keys
+- **Self-hosted** - your data stays on your infrastructure
 
 ---
 
