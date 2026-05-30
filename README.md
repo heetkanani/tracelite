@@ -40,7 +40,7 @@ tracelite sits between your app and your LLM, capturing every prompt, response, 
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/your-username/tracelite.git
+git clone https://github.com/heetkanani/tracelite.git
 cd tracelite
 ```
 
