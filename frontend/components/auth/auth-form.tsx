@@ -79,7 +79,7 @@ export function AuthForm({ mode, onSubmit }: AuthFormProps) {
             id="auth-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Heet Kothari"
+            placeholder="John doe"
             autoComplete="name"
           />
         </div>

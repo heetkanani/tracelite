@@ -27,6 +27,8 @@ import type {
   SessionResponse,
   SignupRequest,
   LoginRequest,
+  ApiKeyCreated,
+  ApiKeyItem,
 } from "@/lib/types";
 
 // ----------------------------------------------------------------------
@@ -65,6 +67,7 @@ export async function apiFetch<T>(
     ...opts,
     credentials: "include", // send tracelite_session cookie
     headers: {
+      "Content-Type": "application/json",
       ...opts.headers,
     },
   });
@@ -257,4 +260,22 @@ export async function logout(): Promise<void> {
 
 export async function getMe(): Promise<UserResponse> {
   return apiFetch<UserResponse>("/v1/auth/me");
+}
+
+
+// --- API Keys ---
+
+export async function listApiKeys(): Promise<ApiKeyItem[]> {
+  return apiFetch("/v1/api-keys");
+}
+
+export async function createApiKey(name: string): Promise<ApiKeyCreated> {
+  return apiFetch("/v1/api-keys", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteApiKey(id: string): Promise<void> {
+  return apiFetch(`/v1/api-keys/${id}`, { method: "DELETE" });
 }

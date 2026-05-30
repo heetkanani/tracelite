@@ -26,6 +26,7 @@ from app.queries import (
     delete_session,
     get_user_by_email,
     get_user_by_id,
+    insert_project,
     insert_session,
     insert_user,
 )
@@ -84,6 +85,16 @@ async def signup_endpoint(
             password_hash=password_hash,
             name=payload.name,
         )
+
+        # Auto-create a default project for the new user.
+        # Every downstream query (traces, evals, alerts) needs a project_id.
+        await insert_project(
+            conn,
+            owner_user_id=user_row["id"],
+            name="My Project",
+        )
+
+        token = new_session_token()
 
         token = new_session_token()
         expires_at = session_expiry_from_now()

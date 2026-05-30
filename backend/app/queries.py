@@ -930,3 +930,70 @@ async def get_user_default_project(
         """,
         user_id,
     )
+
+async def insert_project(
+    conn: asyncpg.Connection,
+    owner_user_id: UUID,
+    name: str,
+) -> asyncpg.Record:
+    """Create a new project and return the row."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO projects (owner_user_id, name)
+        VALUES ($1, $2)
+        RETURNING id, name, owner_user_id
+        """,
+        owner_user_id,
+        name,
+    )
+
+# -------------------------------------------------------------
+# API key management
+# -------------------------------------------------------------
+
+async def list_api_keys(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+) -> list[asyncpg.Record]:
+    """Return all active (non-revoked) API keys for a project."""
+    return await conn.fetch(
+        """
+        SELECT id, name, created_at, last_used_at
+        FROM api_keys
+        WHERE project_id = $1 AND revoked_at IS NULL
+        ORDER BY created_at DESC
+        """,
+        project_id,
+    )
+
+async def insert_api_key(
+    conn: asyncpg.Connection,
+    project_id: UUID,
+    name: str,
+    key: str,
+) -> asyncpg.Record:
+    """Insert a new API key and return the row."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO api_keys (project_id, name, key)
+        VALUES ($1, $2, $3)
+        RETURNING id, name, key, created_at
+        """,
+        project_id, name, key,
+    )
+
+async def revoke_api_key(
+    conn: asyncpg.Connection,
+    key_id: UUID,
+    project_id: UUID,
+) -> bool:
+    """Soft-delete a key by setting revoked_at. Returns True if found."""
+    result = await conn.execute(
+        """
+        UPDATE api_keys
+        SET revoked_at = now()
+        WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL
+        """,
+        key_id, project_id,
+    )
+    return result == "UPDATE 1"

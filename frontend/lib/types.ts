@@ -207,3 +207,21 @@ export interface LoginRequest {
   email: string;
   password: string;
 }
+
+// -----------------------------------------------------------
+// API Keys
+// -----------------------------------------------------------
+
+export interface ApiKeyItem {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiKeyCreated {
+  id: string;
+  name: string;
+  key: string; // full key — shown once
+  created_at: string;
+}
