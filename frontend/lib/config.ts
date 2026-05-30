@@ -16,5 +16,5 @@ export const config = {
     "NEXT_PUBLIC_API_BASE_URL",
     process.env.NEXT_PUBLIC_API_BASE_URL
   ),
-  apiKey: required("NEXT_PUBLIC_API_KEY", process.env.NEXT_PUBLIC_API_KEY),
+  apiKey: process.env.NEXT_PUBLIC_API_KEY ?? "",
 } as const;
