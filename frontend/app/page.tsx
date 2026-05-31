@@ -46,16 +46,16 @@ function Landing() {
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link
-            href="/signup"
+            href="/login"
             className="px-6 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-700 transition-colors"
           >
-            Get started free
+            Try live demo →
           </Link>
           <Link
-            href="/login"
+            href="/signup"
             className="px-6 py-3 text-gray-600 hover:text-gray-900 font-medium transition-colors"
           >
-            Sign in →
+            Get started free
           </Link>
         </div>
       </div>
