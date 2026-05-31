@@ -3,6 +3,7 @@ tracelite backend — FastAPI entry point.
 
 Run with: uvicorn app.main:app --reload --port 8000
 """
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,9 +49,23 @@ app = FastAPI(
 )
 # CORS: allow the local Next.js dev server to call the API.
 # In production we'd lock this down to specific origins.
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:3000"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# Allowed origins: localhost for dev, plus any from FRONTEND_ORIGIN env var.
+_origins = ["http://localhost:3000"]
+_frontend_origin = os.getenv("FRONTEND_ORIGIN")
+if _frontend_origin:
+    _origins.append(_frontend_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

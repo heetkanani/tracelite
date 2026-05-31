@@ -5,8 +5,8 @@ These do NOT require X-API-Key — they're how users get into the system.
 Once authenticated, the returned session token can be used for dashboard
 API calls.
 """
+import os
 from typing import Annotated, Optional
-
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from app.dependencies import AuthContext, get_current_auth
 from app.auth import (
@@ -42,18 +42,25 @@ def _set_session_cookie(response: Response, token: str) -> None:
     Attach a cookie carrying the session token.
 
     HttpOnly → JavaScript can't read it (XSS defense).
-    SameSite=Lax → not sent on cross-site POSTs (CSRF defense).
     Path=/ → sent on every request.
 
-    Note: we DON'T set Secure because dev runs over http://. In production,
-    add Secure=True via an env-conditional config.
+    Cross-domain behavior is env-aware:
+      - Local dev (http): SameSite=Lax, Secure=False
+      - Production (https, cross-subdomain): SameSite=None, Secure=True
+        — required so the browser stores/sends the cookie across the
+        frontend and backend domains.
     """
+    # When the frontend is on a different HTTPS domain (Render), we need
+    # SameSite=None + Secure. Toggle via env var.
+    cross_site = os.getenv("COOKIE_CROSS_SITE", "false").lower() == "true"
+
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         max_age=60 * 60 * 24 * 30,  # 30 days
         httponly=True,
-        samesite="lax",
+        samesite="none" if cross_site else "lax",
+        secure=cross_site,
         path="/",
     )
 
